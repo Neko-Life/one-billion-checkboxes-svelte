@@ -6,7 +6,7 @@
 		idx: number;
 	}
 
-	const maxRow = 256;
+	const maxRow = 128;
 	const maxIdx = 999_999_999;
 
 	let actives: number[] = [];
@@ -59,7 +59,7 @@
 			const firstRow = items[0];
 			const firstItem = firstRow[0];
 			if (firstItem.idx > startNum) {
-				const rpt = (firstItem.idx - startNum) / itemPerRow;
+				const rpt = Math.round((firstItem.idx - startNum) / itemPerRow);
 				// scrolling up, unshift and pop
 				let sb = false;
 				for (let j = rpt; j > 0; j--) {
@@ -77,7 +77,7 @@
 				}
 				items = items;
 			} else if (firstItem.idx < startNum) {
-				const rpt = (startNum - firstItem.idx) / itemPerRow;
+				const rpt = Math.round((startNum - firstItem.idx) / itemPerRow);
 				// scrolling down, shift and push
 				let lid = 0;
 				for (let j = 0; j < rpt; j++) {
@@ -101,7 +101,7 @@
 
 		//updating = false;
 
-		console.log({ items });
+		console.log({ items, itemPerRow, startNum });
 	};
 
 	$: if (innerWidth) {
@@ -131,7 +131,8 @@
 
 		let entry = -1;
 		const thirdFourth = oneFourth * 3;
-		if (scrollBase > thirdFourth && startNum < maxIdx) {
+		const maxStartNum = Math.floor(maxIdx / (itemPerRow * maxRow));
+		if (scrollBase > thirdFourth && startNum < maxStartNum) {
 			// scroll down
 			const diff = scrollBase - thirdFourth;
 			entry = Math.ceil(diff / mod);
@@ -143,7 +144,7 @@
 			const first = firstRow[0];
 			if (!first) throw Error('what');
 			startNum = first.idx + itemPerRow * entry;
-			//if (startNum > ) startNum = 0;
+			if (startNum > maxStartNum) startNum = maxStartNum;
 			//items.shift();
 			vPort.scrollTo(0, scrollBase - mod * entry);
 			update = true;
@@ -158,7 +159,7 @@
 			const first = firstRow[0];
 			if (!first) throw Error('what!');
 			startNum = first.idx - itemPerRow * entry;
-			//if (startNum < 0) startNum = 0;
+			if (startNum < 0) startNum = 0;
 			//items.pop();
 			vPort.scrollTo(0, scrollBase + mod * entry);
 			update = true;
@@ -236,6 +237,33 @@
 			}
 		};
 	});
+
+	let f: number = 0;
+	let l: number = 0;
+
+	const updateCBoxInfo = () => {
+		console.log({ sStart, sEnd });
+		// calculate row from checkbox info instead
+		const firstRow = items[sStart];
+		const first = firstRow?.[0];
+		if (first) {
+			f = first.idx;
+		}
+
+		const lastSeenRow = items[sEnd - 1];
+		const lastSeen = lastSeenRow ? lastSeenRow[lastSeenRow.length - 1] : null;
+		if (lastSeen) {
+			l = lastSeen.idx;
+		}
+	};
+
+	$: if (sStart || sEnd || items) updateCBoxInfo();
+
+	const promptJumpToRow = () => {};
+	const promptJumpToCheckbox = () => {};
+
+	const handleJumpToRow = () => {};
+	const handleJumpToCheckbox = () => {};
 </script>
 
 <svelte:window bind:innerWidth bind:innerHeight />
@@ -243,10 +271,16 @@
 <div class="page-container">
 	<div class="container">
 		<header>
-			<section aria-label="info">
-				<p>{innerWidth}W - {innerHeight}H</p>
-				<p>{widthPerRow}R - {widthPerCBox}C</p>
-				<p>{sStart}S - {sEnd}E</p>
+			<section class="info" aria-label="info">
+				<p>Checkbox: {f + 1}# - {l ? l + 1 : Infinity}#</p>
+				<p>
+					Row: {(f ? Math.floor(f / itemPerRow) : 0) + 1} - {Math.floor(
+						(l - (itemPerRow - 1)) / itemPerRow
+					) + 1}
+				</p>
+				<p>{itemPerRow} Column{itemPerRow === 1 ? '' : 's'}</p>
+				<button on:click={promptJumpToRow}>Jump to row</button>
+				<button on:click={promptJumpToCheckbox}>Jump to checkbox</button>
 			</section>
 			<section class="title-container" aria-label="title">
 				<h1>A Billion Checkboxes</h1>
@@ -314,10 +348,19 @@
 		border-bottom: 2px solid black;
 	}
 
+	.info {
+		font-weight: 600;
+		font-style: italic;
+	}
+
 	.title-container {
 		display: flex;
 		justify-content: center;
 		align-items: center;
+	}
+
+	.title-container h1 {
+		font-size: 36px;
 	}
 
 	.status {
