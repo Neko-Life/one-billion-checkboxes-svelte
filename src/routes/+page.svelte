@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { SERVER_DOMAIN_URL } from '$lib/config';
 
 	interface IItem {
@@ -7,6 +7,7 @@
 		loaded: boolean;
 		active: boolean;
 	}
+	let modalShow = false;
 
 	const maxIdx = 999_999_999;
 	let maxRow = 0;
@@ -22,7 +23,7 @@
 	let cboxes: Map<number, IItem> = new Map();
 	let items: IItem[][] = [];
 
-	let contentContainerRef: HTMLDivElement;
+	let contentRef: HTMLDivElement;
 	let listRef: HTMLElement;
 	let topRef: HTMLDivElement;
 	let bottomRef: HTMLDivElement;
@@ -35,11 +36,12 @@
 
 	let shownRow = 0;
 	let itemPerRow = 0;
+	let hasItemPerRowSet = false;
 
 	let userCount = 0;
 	let contentPT: number = 0;
 
-	$: if (innerWidth) {
+	const updateWidth = (noUpdate = false) => {
 		let update = false;
 		if (testCboxRow && widthPerRow != testCboxRow.clientWidth) {
 			widthPerRow = testCboxRow.clientWidth;
@@ -50,9 +52,10 @@
 			widthPerCBox = testCbox.clientWidth;
 			update = true;
 		}
-		if (update) updateItems(true);
-	}
+		if (!noUpdate && update) updateItems(true);
+	};
 
+	$: if (innerWidth) updateWidth();
 	$: if (innerHeight) updateItems(true);
 
 	const getItem = (i: number) => {
@@ -63,18 +66,27 @@
 		return cboxes.set(i, cbox);
 	};
 
-	const updateItems = (recalculateItemPerRow: boolean = false) => {
-		if (recalculateItemPerRow) {
-			if (!testCboxRow || !listRef /* || !contentContainerRef*/) return;
-
-			//const contentH = `${listRef.clientHeight + testCboxRow.clientHeight}px`;
-			//contentContainerRef.style.minHeight = contentH;
-			//contentContainerRef.style.height = contentH;
-			//contentContainerRef.style.maxHeight = contentH;
-			//contentContainerRef.style.top = `-${testCboxRow.clientHeight}px`;
-
+	let toggleRounding = false;
+	const updateItemPerRow = () => {
+		if (!hasItemPerRowSet) {
 			itemPerRow = Math.floor(widthPerRow / widthPerCBox);
-			maxRow = Math.ceil(listRef.clientHeight / testCboxRow.clientHeight) + 2;
+		}
+
+		startNum = startNum - (startNum % itemPerRow);
+		startNum += toggleRounding ? itemPerRow : 0;
+		toggleRounding = !toggleRounding;
+		if (startNum < 0) startNum = 0;
+	};
+
+	const updateItems = async (recalculateItemPerRow: boolean = false) => {
+		await tick();
+		updateWidth(true);
+		if (recalculateItemPerRow) {
+			if (!testCboxRow || !listRef || !contentRef) return;
+
+			updateItemPerRow();
+
+			maxRow = Math.ceil(listRef.clientHeight / testCboxRow.clientHeight) + 30;
 
 			items = [];
 
@@ -140,11 +152,109 @@
 		}
 
 		console.log({ items, itemPerRow, startNum });
+		updateCBoxInfo();
 	};
 
-	const handleScroll = (event: Event & { target: EventTarget & any }) => {
+	let startIdx = 0;
+	let endIdx = 0;
+
+	const getElDataIdx = (el: HTMLElement, last = false) => {
+		const r = last
+			? el.lastElementChild?.lastElementChild
+			: el.firstElementChild?.firstElementChild;
+
+		return r?.attributes.getNamedItem('data-idx')?.value;
+	};
+
+	const updateSeenStartEnd = async () => {
+		if (!listRef) return;
+
+		await tick();
+
+		const listEl = document.getElementsByClassName('item-row') as HTMLCollectionOf<HTMLDivElement>;
+
+		const containerRects = listRef.getBoundingClientRect();
+
+		let top: HTMLDivElement | undefined;
+		let bottom: HTMLDivElement | undefined;
+		let topRects = top?.getBoundingClientRect();
+		let bottomRects = bottom?.getBoundingClientRect();
+		// find top and bottom
+		for (const el of listEl) {
+			const elRects = el.getBoundingClientRect();
+			if (!getElDataIdx(el)) continue;
+
+			let skip = false;
+
+			if (!top) {
+				if (elRects.bottom > containerRects.top) {
+					top = el;
+					topRects = elRects;
+				}
+
+				skip = true;
+			}
+
+			if (!bottom) {
+				if (elRects.top < containerRects.bottom) {
+					bottom = el;
+					bottomRects = elRects;
+				}
+
+				skip = true;
+			}
+
+			if (skip || !topRects || !bottomRects) continue;
+
+			console.log({
+				elRects,
+				containerRects,
+				topRects,
+				secondYes: elRects.bottom < topRects.bottom,
+				firstYes: elRects.bottom > containerRects.top
+			});
+
+			if (elRects.bottom > containerRects.top && elRects.bottom < topRects.bottom) {
+				topRects = elRects;
+				top = el;
+				console.log({ topSetTo: el });
+			}
+
+			if (elRects.top < containerRects.bottom && elRects.top > bottomRects.top) {
+				bottomRects = elRects;
+				bottom = el;
+			}
+		}
+
+		if (!top || !bottom) return;
+
+		const topInp = getElDataIdx(top);
+		const bottomInp = getElDataIdx(bottom, true);
+		startIdx = topInp ? parseInt(topInp) : 0;
+		endIdx = bottomInp ? parseInt(bottomInp) : 0;
+
+		console.log({
+			top,
+			topRects,
+			bottom,
+			bottomRects,
+			topInp,
+			bottomInp,
+			startIdx,
+			endIdx,
+			containerRects
+		});
+	};
+
+	const handleScroll = updateSeenStartEnd;
+
+	const handleScrollEnd = async (event: Event & { target: EventTarget & any }) => {
 		if (!testCboxRow || !event.target || !topRef || !listRef || !maxRow) return;
+
 		console.log(event, topRef, listRef);
+		await tick();
+
+		updateItemPerRow();
 
 		const vPort = event.target;
 		const scrollBase: number = vPort.scrollTop;
@@ -152,26 +262,51 @@
 
 		if (!scrollMax) return;
 
-		//const maxStartNum = Math.floor(maxIdx / (itemPerRow * maxRow));
+		const oneFourth = /*cboxes.size ? Math.ceil(cboxes.size / itemPerRow) :*/ scrollMax / 4;
+		const mod = testCboxRow.clientHeight;
+		let update = false;
 
-		const skip = Math.floor(scrollBase / testCboxRow.clientHeight);
+		console.log({ oneFourth, scrollBase });
 
-		const newStartNum = skip * itemPerRow;
-		console.log({ startNum, newStartNum });
-		if (startNum !== newStartNum) {
-			startNum = newStartNum;
-			updateItems(true);
+		const thirdFourth = oneFourth * 3;
+		const maxStartNum = Math.floor(maxIdx / (itemPerRow * maxRow));
+
+		if (scrollBase > thirdFourth && startNum < maxStartNum) {
+			// scroll down
+			const diff = scrollBase - thirdFourth;
+			const entry = Math.ceil(diff / mod);
+
+			const firstRow = items[0];
+			if (!firstRow) throw Error('no way');
+			const first = firstRow[0];
+			if (!first) throw Error('what');
+			startNum = first.idx + itemPerRow * entry;
+			vPort.scrollTo(0, scrollBase - mod * entry);
+			update = true;
+		} else if (scrollBase < oneFourth && startNum > 0) {
+			// scroll up
+			const diff = oneFourth - scrollBase;
+			const entry = Math.ceil(diff / mod);
+
+			// !TODO: make this to allow jumping to specific index
+			const firstRow = items[0];
+			if (!firstRow) throw Error('no way!');
+			const first = firstRow[0];
+			if (!first) throw Error('what!');
+			startNum = first.idx - itemPerRow * entry;
+			vPort.scrollTo(0, scrollBase + mod * entry);
+			update = true;
 		}
 
-		//contentPT =
-		//	testCboxRow.clientHeight -
-		//	(scrollBase - testCboxRow.clientHeight * (skip - (startNum ? 0 : 1)));
-		contentPT = testCboxRow.clientHeight * skip;
+		console.log({ startNum, update });
+		if (update) updateItems();
 	};
 
 	const handleReconnect = () => {
 		// !TODO
 		if (wsStatus != -1) return;
+		socketCleanUp();
+		socketInit();
 	};
 
 	const findActiveIdx = (item: IItem) => {
@@ -251,12 +386,7 @@
 		}
 	};
 
-	onMount(() => {
-		if (listRef) {
-			const vPort = listRef; //.$$.ctx[2];
-			vPort.addEventListener('scroll', handleScroll);
-		}
-
+	const socketInit = () => {
 		socket = new WebSocket(`${SERVER_DOMAIN_URL}/game`);
 		wsStatus = 1;
 
@@ -275,38 +405,45 @@
 			console.warn('[CLOSE]', ...args);
 			handleSocketClose(args[0]);
 		};
+	};
+
+	const socketCleanUp = () => {
+		if (socket && (!socket.CLOSED || !socket.CLOSING)) {
+			socket.close();
+		}
+	};
+
+	onMount(() => {
+		if (listRef) {
+			const vPort = listRef; //.$$.ctx[2];
+			vPort.addEventListener('scrollend', handleScrollEnd);
+			vPort.addEventListener('scroll', handleScroll);
+		}
+
+		socketInit();
 
 		return () => {
 			if (listRef) {
 				const vPort = listRef; //.$$.ctx[2];
+				vPort.removeEventListener('scrollend', handleScrollEnd);
 				vPort.removeEventListener('scroll', handleScroll);
 			}
 
-			if (socket && (!socket.CLOSED || !socket.CLOSING)) {
-				socket.close();
-			}
+			socketCleanUp();
 		};
 	});
 
 	let f: number = 0;
 	let l: number = 0;
+	$: if (startIdx || 1) f = startIdx;
+	$: if (endIdx || 1) l = endIdx;
 
-	const updateCBoxInfo = () => {
-		// calculate row from checkbox info instead
-		const firstRow = items[0];
-		const first = firstRow?.[0];
-		if (first) {
-			f = first.idx;
-		}
-
-		const lastSeenRow = items[items.length - 1];
-		const lastSeen = lastSeenRow ? lastSeenRow[lastSeenRow.length - 1] : null;
-		if (lastSeen) {
-			l = lastSeen.idx;
-		}
+	const updateCBoxInfo = async () => {
+		await tick();
+		updateSeenStartEnd();
 	};
 
-	$: if (items) updateCBoxInfo();
+	$: if (items || itemPerRow) updateCBoxInfo();
 
 	const promptJumpToRow = () => {};
 	const promptJumpToCheckbox = () => {};
@@ -323,6 +460,11 @@
 		// split container into smaller part so browser will allow to render it
 		cH = requiredHeight / scrollTrigger;
 	}
+
+	$: fStr = Math.floor(f ? f / itemPerRow : 0) + 1;
+	$: lStr = Math.floor(l ? (l - (itemPerRow - 1)) / itemPerRow : 0) + 1;
+	$: console.log({ f, l, fStr, lStr, itemPerRow });
+	$: console.log({ itemPerRow, innerHeight, maxRow, testCboxRowHeight: testCboxRow?.clientHeight });
 </script>
 
 <svelte:window bind:innerWidth bind:innerHeight />
@@ -333,7 +475,7 @@
 			<section class="info" aria-label="info">
 				<p>Checkbox: {f + 1}# - {l ? l + 1 : Infinity}#</p>
 				<p>
-					Row: {(f ? f / itemPerRow : 0) + 1} - {(l - (itemPerRow - 1)) / itemPerRow + 1}
+					Row: {fStr} - {lStr}
 				</p>
 				<p>{itemPerRow} Column{itemPerRow === 1 ? '' : 's'}</p>
 
@@ -358,7 +500,7 @@
 			</section>
 		</header>
 
-		<main aria-label="content">
+		<main bind:this={listRef} aria-label="content">
 			<div class="content-container-container"></div>
 
 			<div bind:this={testCboxRow} class="item-row zh">
@@ -373,33 +515,35 @@
 			{#each new Array(scrollTrigger).fill(null) as i}
 				<div style="min-height: {cH}px;" class="scroll-trigger">whats wrong w u?</div>
 			{/each}
-                        -->
-			<div bind:this={listRef} class="content-container">
-				<div class="content">
 					<div style="padding-top: {contentPT}px;"></div>
-					{#each items as item}
-						{#key item[0].idx}
-							<div class="item-row">
-								{#each item as i}
-									<div class="inp-container">
-										<input
-											class="inp-item"
-											type="checkbox"
-											data-idx={i.idx}
-											checked={isActive(i)}
-											on:click={(e) => handleCBoxClick(e, i, item)}
-										/>
-									</div>
-								{/each}
-							</div>
-						{/key}
-					{/each}
-				</div>
+			<div  class="content-container">
+			</div>
+                        -->
+			<div bind:this={contentRef} class="content">
+				{#each items as item}
+					{#key item[0].idx}
+						<div class="item-row">
+							{#each item as i}
+								<div class="inp-container">
+									<input
+										class="inp-item"
+										type="checkbox"
+										data-idx={i.idx}
+										checked={isActive(i)}
+										on:click={(e) => handleCBoxClick(e, i, item)}
+									/>
+								</div>
+							{/each}
+						</div>
+					{/key}
+				{/each}
 			</div>
 			<div bind:this={bottomRef}></div>
 		</main>
 	</div>
 </div>
+
+<div class="modal-container {modalShow ? 'show' : ''}"></div>
 
 <style>
 	.page-container {
@@ -473,7 +617,7 @@
 	}
 
 	.content {
-		height: 10000000px;
+		height: 100%;
 	}
 
 	.item-row {
@@ -484,13 +628,15 @@
 
 	.inp-container {
 		animation: fade-in ease-in 500ms;
+		width: 34px;
+		height: 34px;
 	}
 
 	.inp-item {
 		padding: 2px;
+		margin: 2px;
 		width: 30px;
 		height: 30px;
-		margin: 2px;
 	}
 
 	.zh {
