@@ -1,38 +1,69 @@
 <script lang="ts">
-	import VirtualList from '@sveltejs/svelte-virtual-list';
 	import { onMount } from 'svelte';
+	import { SERVER_DOMAIN_URL } from '$lib/config';
 
 	interface IItem {
 		idx: number;
+		loaded: boolean;
+		active: boolean;
 	}
 
 	const maxRow = 128;
 	const maxIdx = 999_999_999;
 
-	let actives: number[] = [];
-	let connected = false;
+	let socket: WebSocket;
+
+	let wsStatus = -1;
 
 	let innerWidth: number = 0;
 	let innerHeight: number = 0;
 
 	let startNum = 0;
-	//let cboxes: Map<number, IItem> = new Map();
+	let cboxes: Map<number, IItem> = new Map();
 	let items: IItem[][] = [];
+
+	let contentContainerRef: HTMLDivElement;
+	let listRef: HTMLElement;
+	let topRef: HTMLDivElement;
+	let bottomRef: HTMLDivElement;
 
 	let testCboxRow: HTMLDivElement;
 	let testCbox: HTMLDivElement;
+
 	let widthPerRow: number = 0;
 	let widthPerCBox: number = 0;
+
+	let shownRow = 0;
 	let itemPerRow = 0;
-	let updating = false;
 
 	let sStart: number = 0;
 	let sEnd: number = 0;
 
-	const updateItems = (recalculateItemPerRow: boolean = false) => {
-		//if (updating) return;
-		//updating = true;
+	let userCount = 0;
 
+	$: if (innerWidth) {
+		let update = false;
+		if (testCboxRow && widthPerRow != testCboxRow.clientWidth) {
+			widthPerRow = testCboxRow.clientWidth;
+			update = true;
+		}
+
+		if (testCbox && widthPerCBox != testCbox.clientWidth) {
+			widthPerCBox = testCbox.clientWidth;
+			update = true;
+		}
+		if (update) updateItems(true);
+	}
+
+	const getItem = (i: number) => {
+		return cboxes.get(i) || { idx: i, loaded: false, active: false };
+	};
+
+	const setItem = (i: number, cbox: IItem) => {
+		return cboxes.set(i, cbox);
+	};
+
+	const updateItems = (recalculateItemPerRow: boolean = false) => {
 		if (recalculateItemPerRow) {
 			itemPerRow = Math.floor(widthPerRow / widthPerCBox);
 
@@ -45,9 +76,9 @@
 				const end = start + itemPerRow;
 
 				for (let j = start; j < end; j++) {
-					const cbox = /*cboxes.get(j) ||*/ { idx: j };
+					const cbox = getItem(j);
 					row.push(cbox);
-					//cboxes.set(j, cbox);
+					setItem(j, cbox);
 					if (j >= maxIdx) break;
 				}
 
@@ -70,7 +101,7 @@
 							sb = true;
 							break;
 						}
-						row.push({ idx: i });
+						row.push(getItem(i));
 					}
 					if (sb) break;
 					items.unshift(row);
@@ -87,7 +118,7 @@
 					const row = [];
 					for (let i = lastItem.idx + 1; i < lastItem.idx + 1 + itemPerRow; i++) {
 						lid = i;
-						row.push({ idx: i });
+						row.push(getItem(i));
 						if (lid >= maxIdx) break;
 					}
 					items.push(row);
@@ -99,59 +130,47 @@
 			// else nothing to do
 		}
 
-		//updating = false;
-
 		console.log({ items, itemPerRow, startNum });
 	};
 
-	$: if (innerWidth) {
-		let update = false;
-		if (testCboxRow && widthPerRow != testCboxRow.clientWidth) {
-			widthPerRow = testCboxRow.clientWidth;
-			update = true;
-		}
-
-		if (testCbox && widthPerCBox != testCbox.clientWidth) {
-			widthPerCBox = testCbox.clientWidth;
-			update = true;
-		}
-		if (update) updateItems(true);
-	}
-
 	const handleScroll = (event: Event & { currentTarget: EventTarget & any }) => {
-		if (!testCboxRow || updating || !event.currentTarget) return;
+		if (!testCboxRow || !event.currentTarget) return;
+
 		const vPort = event.currentTarget;
-		const scrollBase: number = vPort.scrollTop;
-		const scrollMax: number = vPort.scrollTopMax;
+		// !TODO
+		//const scrollBase: number = vPort.scrollTop;
+		//const scrollMax: number = vPort.scrollTopMax;
+		const scrollBase: number = 0;
+		const scrollMax: number = 0;
+
+		if (!scrollMax) return;
+
 		const oneFourth = /*cboxes.size ? Math.ceil(cboxes.size / itemPerRow) :*/ scrollMax / 4;
-		const mod = testCboxRow.clientHeight; /* + testCboxRow.clientHeight / 2*/
+		const mod = testCboxRow.clientHeight;
 		let update = false;
 
 		console.log({ oneFourth, scrollBase });
 
-		let entry = -1;
 		const thirdFourth = oneFourth * 3;
 		const maxStartNum = Math.floor(maxIdx / (itemPerRow * maxRow));
+
 		if (scrollBase > thirdFourth && startNum < maxStartNum) {
 			// scroll down
 			const diff = scrollBase - thirdFourth;
-			entry = Math.ceil(diff / mod);
+			const entry = Math.ceil(diff / mod);
 
-			//const firstRow = items.shift();
 			const firstRow = items[0];
 			if (!firstRow) throw Error('no way');
-			//const last = firstRow.pop();
 			const first = firstRow[0];
 			if (!first) throw Error('what');
 			startNum = first.idx + itemPerRow * entry;
 			if (startNum > maxStartNum) startNum = maxStartNum;
-			//items.shift();
 			vPort.scrollTo(0, scrollBase - mod * entry);
 			update = true;
 		} else if (scrollBase < oneFourth && startNum > 0) {
 			// scroll up
 			const diff = oneFourth - scrollBase;
-			entry = Math.ceil(diff / mod);
+			const entry = Math.ceil(diff / mod);
 
 			// !TODO: make this to allow jumping to specific index
 			const firstRow = items[0];
@@ -160,36 +179,33 @@
 			if (!first) throw Error('what!');
 			startNum = first.idx - itemPerRow * entry;
 			if (startNum < 0) startNum = 0;
-			//items.pop();
 			vPort.scrollTo(0, scrollBase + mod * entry);
 			update = true;
 		}
-		console.log({ startNum, entry }, vPort);
-		// !TODO: temp force recalculating everything
-		// it should do some loop if it were gonna push/pop only
-		// when entry > 1
-		if (update) updateItems(/*entry > 1*/);
+
+		console.log({ startNum, update });
+		if (update) updateItems();
 	};
 
 	const handleReconnect = () => {
 		// !TODO
-		connected = true;
+		if (wsStatus != -1) return;
 	};
 
 	const findActiveIdx = (item: IItem) => {
-		return actives.findIndex((v) => v === item.idx);
+		return getItem(item.idx);
 	};
 
 	const isActive = (item: IItem) => {
 		//console.log({ isActive: item, actives });
-		return findActiveIdx(item) !== -1;
+		return !!findActiveIdx(item).active;
 	};
 
 	const removeActive = (item: IItem) => {
 		const idx = findActiveIdx(item);
 
-		if (idx !== -1) {
-			actives.splice(idx, 1);
+		if (idx.active) {
+			setItem(idx.idx, { ...idx, active: false });
 			return true;
 		}
 
@@ -199,16 +215,27 @@
 	const addActive = (item: IItem) => {
 		const idx = findActiveIdx(item);
 
-		if (idx === -1) {
-			actives = [...actives, item.idx];
+		if (!idx.active) {
+			setItem(idx.idx, { ...idx, active: true });
 			return true;
 		}
 
 		return false;
 	};
 
+	const sendSwitch = (i: number) => {
+		if (wsStatus !== 0) return;
+		socket.send(i.toString());
+	};
+
+	const sendLoadReq = (i: number) => {
+		if (wsStatus !== 0) return;
+		socket.send(`gcv;${i}`);
+	};
+
 	const switchActive = (item: IItem) => {
 		console.log({ switchActive: item });
+		sendSwitch(item.idx);
 		if (removeActive(item)) return;
 		addActive(item);
 	};
@@ -223,21 +250,63 @@
 		switchActive(item);
 	};
 
-	let listRef: any;
+	const handleSocketOpen = (ev: Event) => {
+		wsStatus = 0;
+
+		socket.send('gv;');
+	};
+
+	const handleSocketMessage = async (ev: MessageEvent<Blob>) => {
+		const data = await ev.data.text();
+		console.log({ data });
+	};
+
+	const handleSocketClose = (ev: CloseEvent) => {
+		// !TODO: toast
+		wsStatus = -1;
+		for (const [, v] of cboxes) {
+			v.loaded = false;
+		}
+	};
+
 	onMount(() => {
 		if (listRef) {
-			const vPort: HTMLDivElement = listRef.$$.ctx[2];
-			vPort.addEventListener('scrollend', handleScroll);
+			const vPort = listRef; //.$$.ctx[2];
+			vPort.addEventListener('scroll', handleScroll);
 		}
+
+		socket = new WebSocket(`${SERVER_DOMAIN_URL}/game`);
+		wsStatus = 1;
+
+		socket.onopen = (...args) => {
+			console.log('[OPEN]', ...args);
+			handleSocketOpen(args[0]);
+		};
+
+		socket.onmessage = (...args) => {
+			console.log('[MESSAGE]', ...args);
+			handleSocketMessage(args[0]);
+		};
+		socket.onerror = (...args) => console.error('[ERROR]', ...args);
+
+		socket.onclose = (...args) => {
+			console.warn('[CLOSE]', ...args);
+			handleSocketClose(args[0]);
+		};
 
 		return () => {
 			if (listRef) {
-				const vPort: HTMLDivElement = listRef.$$.ctx[2];
-				vPort.removeEventListener('scrollend', handleScroll);
+				const vPort = listRef; //.$$.ctx[2];
+				vPort.removeEventListener('scroll', handleScroll);
+			}
+
+			if (socket && (!socket.CLOSED || !socket.CLOSING)) {
+				socket.close();
 			}
 		};
 	});
 
+	let contentPT = 0; // can only be 0-(testCboxRow.clientHeight-1)
 	let f: number = 0;
 	let l: number = 0;
 
@@ -264,6 +333,16 @@
 
 	const handleJumpToRow = () => {};
 	const handleJumpToCheckbox = () => {};
+
+	let requiredHeight: number;
+	let cH: number;
+	const scrollTrigger = 5;
+	$: {
+		requiredHeight =
+			testCboxRow && itemPerRow ? ((maxIdx + 1) / itemPerRow) * testCboxRow.clientHeight : 0;
+		// split container into smaller part so browser will allow to render it
+		cH = requiredHeight / scrollTrigger;
+	}
 </script>
 
 <svelte:window bind:innerWidth bind:innerHeight />
@@ -279,6 +358,7 @@
 					) + 1}
 				</p>
 				<p>{itemPerRow} Column{itemPerRow === 1 ? '' : 's'}</p>
+
 				<button on:click={promptJumpToRow}>Jump to row</button>
 				<button on:click={promptJumpToCheckbox}>Jump to checkbox</button>
 			</section>
@@ -286,15 +366,43 @@
 				<h1>A Billion Checkboxes</h1>
 			</section>
 			<section class="status" aria-label="status">
-				{#if connected}
-					Connected
-				{:else}
+				{#if userCount > 0}
+					<p>{userCount} user{userCount == 1 ? '' : 's'} playing</p>
+				{/if}
+
+				{#if wsStatus === 0}
+					<p>Connected</p>
+				{:else if wsStatus === 1}
+					<p>Connecting...</p>
+				{:else if wsStatus === -1}
 					<button on:click={handleReconnect}>Reconnect</button>
 				{/if}
 			</section>
 		</header>
 
-		<main aria-label="content">
+		<main bind:this={listRef} aria-label="content">
+			<div class="content-container-container">
+				<div bind:this={contentContainerRef} class="content-container">
+					<div style="padding-top: {contentPT}px;">
+						{#each items as item}
+							<div class="item-row">
+								{#each item as i}
+									<div class="inp-container">
+										<input
+											class="inp-item"
+											type="checkbox"
+											data-idx={i.idx}
+											checked={isActive(i)}
+											on:click={(e) => handleCBoxClick(e, i, item)}
+										/>
+									</div>
+								{/each}
+							</div>
+						{/each}
+					</div>
+				</div>
+			</div>
+
 			<div bind:this={testCboxRow} class="item-row zh">
 				<div class="inp-container" bind:this={testCbox}>
 					<input class="inp-item" type="checkbox" />
@@ -302,23 +410,40 @@
 			</div>
 			<div class="zh-cov"></div>
 
-			<VirtualList bind:this={listRef} {items} let:item bind:start={sStart} bind:end={sEnd}>
+			<!--
+                        -->
+			<div bind:this={topRef}></div>
+			{#each new Array(scrollTrigger).fill(null) as i}
+				<div style="min-height: {cH}px;" class="scroll-trigger">whats wrong w u?</div>
+			{/each}
+			<div bind:this={bottomRef}></div>
+
+			<!--
+			<VirtualList
+				height="{testCboxRow && itemPerRow
+					? ((maxIdx + 1) / itemPerRow) * testCboxRow.clientHeight
+					: 0}px"
+				bind:this={listRef}
+				{items}
+				let:item
+				bind:start={sStart}
+				bind:end={sEnd}
+			>
 				<div class="item-row">
 					{#each item as i}
-						{#key i.idx}
-							<div class="inp-container">
-								<input
-									class="inp-item"
-									type="checkbox"
-									data-idx={i.idx}
-									checked={isActive(i)}
-									on:click={(e) => handleCBoxClick(e, i, item)}
-								/>
-							</div>
-						{/key}
+						<div class="inp-container">
+							<input
+								class="inp-item"
+								type="checkbox"
+								data-idx={i.idx}
+								checked={isActive(i)}
+								on:click={(e) => handleCBoxClick(e, i, item)}
+							/>
+						</div>
 					{/each}
 				</div>
 			</VirtualList>
+                -->
 		</main>
 	</div>
 </div>
@@ -365,6 +490,7 @@
 
 	.status {
 		display: flex;
+		flex-direction: column;
 		justify-content: flex-end;
 		align-items: flex-end;
 	}
@@ -377,6 +503,22 @@
 		position: relative;
 	}
 
+	.content-container-container {
+		position: sticky;
+		top: 0;
+		max-height: 0px;
+	}
+
+	.content-container {
+		position: absolute;
+		top: 0;
+		left: 0;
+		min-width: 100%;
+		width: 100%;
+		max-width: 100%;
+		overflow: hidden;
+	}
+
 	.item-row {
 		display: flex;
 		justify-content: space-evenly;
@@ -385,6 +527,7 @@
 
 	.inp-container {
 		padding: 2px;
+		animation: fade-in ease-in 500ms;
 	}
 
 	.inp-item {
@@ -404,5 +547,19 @@
 		height: 100%;
 		width: 100%;
 		background-color: white;
+	}
+
+	.scroll-trigger {
+		transform: translateX(1000%);
+	}
+
+	@keyframes fade-in {
+		0% {
+			opacity: 0;
+		}
+
+		100% {
+			opacity: 1;
+		}
 	}
 </style>
