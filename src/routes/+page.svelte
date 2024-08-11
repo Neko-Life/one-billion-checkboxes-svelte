@@ -8,8 +8,8 @@
 		active: boolean;
 	}
 
-	const maxRow = 128;
 	const maxIdx = 999_999_999;
+	let maxRow = 0;
 
 	let socket: WebSocket;
 
@@ -27,7 +27,7 @@
 	let topRef: HTMLDivElement;
 	let bottomRef: HTMLDivElement;
 
-	let testCboxRow: HTMLDivElement;
+	let testCboxRow: HTMLDivElement | undefined;
 	let testCbox: HTMLDivElement;
 
 	let widthPerRow: number = 0;
@@ -36,10 +36,8 @@
 	let shownRow = 0;
 	let itemPerRow = 0;
 
-	let sStart: number = 0;
-	let sEnd: number = 0;
-
 	let userCount = 0;
+	let contentPT: number = 0;
 
 	$: if (innerWidth) {
 		let update = false;
@@ -55,6 +53,8 @@
 		if (update) updateItems(true);
 	}
 
+	$: if (innerHeight) updateItems(true);
+
 	const getItem = (i: number) => {
 		return cboxes.get(i) || { idx: i, loaded: false, active: false };
 	};
@@ -65,7 +65,16 @@
 
 	const updateItems = (recalculateItemPerRow: boolean = false) => {
 		if (recalculateItemPerRow) {
+			if (!testCboxRow || !listRef /* || !contentContainerRef*/) return;
+
+			//const contentH = `${listRef.clientHeight + testCboxRow.clientHeight}px`;
+			//contentContainerRef.style.minHeight = contentH;
+			//contentContainerRef.style.height = contentH;
+			//contentContainerRef.style.maxHeight = contentH;
+			//contentContainerRef.style.top = `-${testCboxRow.clientHeight}px`;
+
 			itemPerRow = Math.floor(widthPerRow / widthPerCBox);
+			maxRow = Math.ceil(listRef.clientHeight / testCboxRow.clientHeight) + 2;
 
 			items = [];
 
@@ -133,58 +142,31 @@
 		console.log({ items, itemPerRow, startNum });
 	};
 
-	const handleScroll = (event: Event & { currentTarget: EventTarget & any }) => {
-		if (!testCboxRow || !event.currentTarget) return;
+	const handleScroll = (event: Event & { target: EventTarget & any }) => {
+		if (!testCboxRow || !event.target || !topRef || !listRef || !maxRow) return;
+		console.log(event, topRef, listRef);
 
-		const vPort = event.currentTarget;
-		// !TODO
-		//const scrollBase: number = vPort.scrollTop;
-		//const scrollMax: number = vPort.scrollTopMax;
-		const scrollBase: number = 0;
-		const scrollMax: number = 0;
+		const vPort = event.target;
+		const scrollBase: number = vPort.scrollTop;
+		const scrollMax: number = vPort.scrollTopMax;
 
 		if (!scrollMax) return;
 
-		const oneFourth = /*cboxes.size ? Math.ceil(cboxes.size / itemPerRow) :*/ scrollMax / 4;
-		const mod = testCboxRow.clientHeight;
-		let update = false;
+		//const maxStartNum = Math.floor(maxIdx / (itemPerRow * maxRow));
 
-		console.log({ oneFourth, scrollBase });
+		const skip = Math.floor(scrollBase / testCboxRow.clientHeight);
 
-		const thirdFourth = oneFourth * 3;
-		const maxStartNum = Math.floor(maxIdx / (itemPerRow * maxRow));
-
-		if (scrollBase > thirdFourth && startNum < maxStartNum) {
-			// scroll down
-			const diff = scrollBase - thirdFourth;
-			const entry = Math.ceil(diff / mod);
-
-			const firstRow = items[0];
-			if (!firstRow) throw Error('no way');
-			const first = firstRow[0];
-			if (!first) throw Error('what');
-			startNum = first.idx + itemPerRow * entry;
-			if (startNum > maxStartNum) startNum = maxStartNum;
-			vPort.scrollTo(0, scrollBase - mod * entry);
-			update = true;
-		} else if (scrollBase < oneFourth && startNum > 0) {
-			// scroll up
-			const diff = oneFourth - scrollBase;
-			const entry = Math.ceil(diff / mod);
-
-			// !TODO: make this to allow jumping to specific index
-			const firstRow = items[0];
-			if (!firstRow) throw Error('no way!');
-			const first = firstRow[0];
-			if (!first) throw Error('what!');
-			startNum = first.idx - itemPerRow * entry;
-			if (startNum < 0) startNum = 0;
-			vPort.scrollTo(0, scrollBase + mod * entry);
-			update = true;
+		const newStartNum = skip * itemPerRow;
+		console.log({ startNum, newStartNum });
+		if (startNum !== newStartNum) {
+			startNum = newStartNum;
+			updateItems(true);
 		}
 
-		console.log({ startNum, update });
-		if (update) updateItems();
+		//contentPT =
+		//	testCboxRow.clientHeight -
+		//	(scrollBase - testCboxRow.clientHeight * (skip - (startNum ? 0 : 1)));
+		contentPT = testCboxRow.clientHeight * skip;
 	};
 
 	const handleReconnect = () => {
@@ -306,27 +288,25 @@
 		};
 	});
 
-	let contentPT = 0; // can only be 0-(testCboxRow.clientHeight-1)
 	let f: number = 0;
 	let l: number = 0;
 
 	const updateCBoxInfo = () => {
-		console.log({ sStart, sEnd });
 		// calculate row from checkbox info instead
-		const firstRow = items[sStart];
+		const firstRow = items[0];
 		const first = firstRow?.[0];
 		if (first) {
 			f = first.idx;
 		}
 
-		const lastSeenRow = items[sEnd - 1];
+		const lastSeenRow = items[items.length - 1];
 		const lastSeen = lastSeenRow ? lastSeenRow[lastSeenRow.length - 1] : null;
 		if (lastSeen) {
 			l = lastSeen.idx;
 		}
 	};
 
-	$: if (sStart || sEnd || items) updateCBoxInfo();
+	$: if (items) updateCBoxInfo();
 
 	const promptJumpToRow = () => {};
 	const promptJumpToCheckbox = () => {};
@@ -336,7 +316,7 @@
 
 	let requiredHeight: number;
 	let cH: number;
-	const scrollTrigger = 5;
+	const scrollTrigger = 500;
 	$: {
 		requiredHeight =
 			testCboxRow && itemPerRow ? ((maxIdx + 1) / itemPerRow) * testCboxRow.clientHeight : 0;
@@ -353,9 +333,7 @@
 			<section class="info" aria-label="info">
 				<p>Checkbox: {f + 1}# - {l ? l + 1 : Infinity}#</p>
 				<p>
-					Row: {(f ? Math.floor(f / itemPerRow) : 0) + 1} - {Math.floor(
-						(l - (itemPerRow - 1)) / itemPerRow
-					) + 1}
+					Row: {(f ? f / itemPerRow : 0) + 1} - {(l - (itemPerRow - 1)) / itemPerRow + 1}
 				</p>
 				<p>{itemPerRow} Column{itemPerRow === 1 ? '' : 's'}</p>
 
@@ -380,11 +358,27 @@
 			</section>
 		</header>
 
-		<main bind:this={listRef} aria-label="content">
-			<div class="content-container-container">
-				<div bind:this={contentContainerRef} class="content-container">
-					<div style="padding-top: {contentPT}px;">
-						{#each items as item}
+		<main aria-label="content">
+			<div class="content-container-container"></div>
+
+			<div bind:this={testCboxRow} class="item-row zh">
+				<div class="inp-container" bind:this={testCbox}>
+					<input class="inp-item" type="checkbox" />
+				</div>
+			</div>
+			<div class="zh-cov"></div>
+
+			<div bind:this={topRef}></div>
+			<!--
+			{#each new Array(scrollTrigger).fill(null) as i}
+				<div style="min-height: {cH}px;" class="scroll-trigger">whats wrong w u?</div>
+			{/each}
+                        -->
+			<div bind:this={listRef} class="content-container">
+				<div class="content">
+					<div style="padding-top: {contentPT}px;"></div>
+					{#each items as item}
+						{#key item[0].idx}
 							<div class="item-row">
 								{#each item as i}
 									<div class="inp-container">
@@ -398,52 +392,11 @@
 									</div>
 								{/each}
 							</div>
-						{/each}
-					</div>
-				</div>
-			</div>
-
-			<div bind:this={testCboxRow} class="item-row zh">
-				<div class="inp-container" bind:this={testCbox}>
-					<input class="inp-item" type="checkbox" />
-				</div>
-			</div>
-			<div class="zh-cov"></div>
-
-			<!--
-                        -->
-			<div bind:this={topRef}></div>
-			{#each new Array(scrollTrigger).fill(null) as i}
-				<div style="min-height: {cH}px;" class="scroll-trigger">whats wrong w u?</div>
-			{/each}
-			<div bind:this={bottomRef}></div>
-
-			<!--
-			<VirtualList
-				height="{testCboxRow && itemPerRow
-					? ((maxIdx + 1) / itemPerRow) * testCboxRow.clientHeight
-					: 0}px"
-				bind:this={listRef}
-				{items}
-				let:item
-				bind:start={sStart}
-				bind:end={sEnd}
-			>
-				<div class="item-row">
-					{#each item as i}
-						<div class="inp-container">
-							<input
-								class="inp-item"
-								type="checkbox"
-								data-idx={i.idx}
-								checked={isActive(i)}
-								on:click={(e) => handleCBoxClick(e, i, item)}
-							/>
-						</div>
+						{/key}
 					{/each}
 				</div>
-			</VirtualList>
-                -->
+			</div>
+			<div bind:this={bottomRef}></div>
 		</main>
 	</div>
 </div>
@@ -499,7 +452,8 @@
 		display: flex;
 		flex-direction: column;
 		flex-grow: 1;
-		overflow: scroll;
+		overflow-y: scroll;
+		overflow-x: hidden;
 		position: relative;
 	}
 
@@ -510,13 +464,16 @@
 	}
 
 	.content-container {
-		position: absolute;
-		top: 0;
+		/*position: absolute;
 		left: 0;
 		min-width: 100%;
 		width: 100%;
-		max-width: 100%;
-		overflow: hidden;
+		max-width: 100%;*/
+		overflow: scroll;
+	}
+
+	.content {
+		height: 10000000px;
 	}
 
 	.item-row {
@@ -526,14 +483,14 @@
 	}
 
 	.inp-container {
-		padding: 2px;
 		animation: fade-in ease-in 500ms;
 	}
 
 	.inp-item {
+		padding: 2px;
 		width: 30px;
 		height: 30px;
-		margin: 4px;
+		margin: 2px;
 	}
 
 	.zh {
@@ -555,11 +512,11 @@
 
 	@keyframes fade-in {
 		0% {
-			opacity: 0;
+			/*opacity: 0;*/
 		}
 
 		100% {
-			opacity: 1;
+			/*opacity: 1;*/
 		}
 	}
 </style>
