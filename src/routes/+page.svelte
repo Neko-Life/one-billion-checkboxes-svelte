@@ -19,7 +19,7 @@
 	let innerWidth: number = 0;
 	let innerHeight: number = 0;
 
-	let startNum = 0;
+	let startNum = 999_999_000;
 	let cboxes: Map<number, IItem> = new Map();
 	let items: IItem[][] = [];
 
@@ -34,12 +34,11 @@
 	let widthPerRow: number = 0;
 	let widthPerCBox: number = 0;
 
-	let shownRow = 0;
 	let itemPerRow = 0;
 	let hasItemPerRowSet = false;
 
 	let userCount = 0;
-	let contentPT: number = 0;
+	let maxStartNum = 0;
 
 	const updateWidth = (noUpdate = false) => {
 		let update = false;
@@ -72,10 +71,17 @@
 			itemPerRow = Math.floor(widthPerRow / widthPerCBox);
 		}
 
+		if (testCboxRow && listRef) {
+			const maxR = Math.ceil(listRef.clientHeight / testCboxRow.clientHeight);
+			maxRow = maxR + 30;
+			maxStartNum = maxIdx + 1 - maxRow * itemPerRow + itemPerRow;
+		}
+
 		startNum = startNum - (startNum % itemPerRow);
-		startNum += toggleRounding ? itemPerRow : 0;
+		startNum += startNum > 0 && toggleRounding ? itemPerRow : 0;
 		toggleRounding = !toggleRounding;
 		if (startNum < 0) startNum = 0;
+		if (startNum > maxStartNum) startNum = maxStartNum;
 	};
 
 	const updateItems = async (recalculateItemPerRow: boolean = false) => {
@@ -86,8 +92,6 @@
 
 			updateItemPerRow();
 
-			maxRow = Math.ceil(listRef.clientHeight / testCboxRow.clientHeight) + 30;
-
 			items = [];
 
 			const toRow = /*cboxes.size ? Math.ceil(cboxes.size / itemPerRow) :*/ maxRow;
@@ -97,13 +101,13 @@
 				const end = start + itemPerRow;
 
 				for (let j = start; j < end; j++) {
+					if (j > maxIdx) break;
 					const cbox = getItem(j);
 					row.push(cbox);
 					setItem(j, cbox);
-					if (j >= maxIdx) break;
 				}
 
-				items.push(row);
+				if (row.length) items.push(row);
 				if (row[row.length - 1].idx >= maxIdx) break;
 			}
 		} else {
@@ -133,17 +137,19 @@
 				// scrolling down, shift and push
 				let lid = 0;
 				for (let j = 0; j < rpt; j++) {
-					items.shift();
+					if (lid > maxIdx) break;
 					const lastRow = items[items.length - 1];
 					const lastItem = lastRow[lastRow.length - 1];
+					lid = lastItem.idx;
+					if (lid > maxIdx) break;
+					items.shift();
 					const row = [];
 					for (let i = lastItem.idx + 1; i < lastItem.idx + 1 + itemPerRow; i++) {
 						lid = i;
+						if (lid > maxIdx) break;
 						row.push(getItem(i));
-						if (lid >= maxIdx) break;
 					}
-					items.push(row);
-					if (lid >= maxIdx) break;
+					if (row.length) items.push(row);
 				}
 				items = items;
 			}
@@ -252,7 +258,6 @@
 		if (!testCboxRow || !event.target || !topRef || !listRef || !maxRow) return;
 
 		console.log(event, topRef, listRef);
-		await tick();
 
 		updateItemPerRow();
 
@@ -266,12 +271,11 @@
 		const mod = testCboxRow.clientHeight;
 		let update = false;
 
-		console.log({ oneFourth, scrollBase });
-
 		const thirdFourth = oneFourth * 3;
-		const maxStartNum = Math.floor(maxIdx / (itemPerRow * maxRow));
 
-		if (scrollBase > thirdFourth && startNum < maxStartNum) {
+		console.log({ oneFourth, scrollBase, startNum, maxStartNum });
+
+		if (scrollBase > thirdFourth && startNum < maxStartNum && endIdx < maxIdx) {
 			// scroll down
 			const diff = scrollBase - thirdFourth;
 			const entry = Math.ceil(diff / mod);
@@ -281,6 +285,7 @@
 			const first = firstRow[0];
 			if (!first) throw Error('what');
 			startNum = first.idx + itemPerRow * entry;
+			console.log('Update from scrolldown');
 			vPort.scrollTo(0, scrollBase - mod * entry);
 			update = true;
 		} else if (scrollBase < oneFourth && startNum > 0) {
@@ -294,6 +299,7 @@
 			const first = firstRow[0];
 			if (!first) throw Error('what!');
 			startNum = first.idx - itemPerRow * entry;
+			console.log('Update from scrollup');
 			vPort.scrollTo(0, scrollBase + mod * entry);
 			update = true;
 		}
@@ -439,7 +445,6 @@
 	$: if (endIdx || 1) l = endIdx;
 
 	const updateCBoxInfo = async () => {
-		await tick();
 		updateSeenStartEnd();
 	};
 
@@ -451,20 +456,17 @@
 	const handleJumpToRow = () => {};
 	const handleJumpToCheckbox = () => {};
 
-	let requiredHeight: number;
-	let cH: number;
-	const scrollTrigger = 500;
-	$: {
-		requiredHeight =
-			testCboxRow && itemPerRow ? ((maxIdx + 1) / itemPerRow) * testCboxRow.clientHeight : 0;
-		// split container into smaller part so browser will allow to render it
-		cH = requiredHeight / scrollTrigger;
-	}
+	//$: {
+	//requiredHeight =
+	//	testCboxRow && itemPerRow ? ((maxIdx + 1) / itemPerRow) * testCboxRow.clientHeight : 0;
+	// split container into smaller part so browser will allow to render it
+	//cH = requiredHeight / scrollTrigger;
+	//}
 
 	$: fStr = Math.floor(f ? f / itemPerRow : 0) + 1;
 	$: lStr = Math.floor(l ? (l - (itemPerRow - 1)) / itemPerRow : 0) + 1;
-	$: console.log({ f, l, fStr, lStr, itemPerRow });
-	$: console.log({ itemPerRow, innerHeight, maxRow, testCboxRowHeight: testCboxRow?.clientHeight });
+	//$: console.log({ f, l, fStr, lStr, itemPerRow });
+	//$: console.log({ itemPerRow, innerHeight, maxRow, testCboxRowHeight: testCboxRow?.clientHeight });
 </script>
 
 <svelte:window bind:innerWidth bind:innerHeight />
