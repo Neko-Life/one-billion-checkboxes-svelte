@@ -6,11 +6,15 @@
 		idx: number;
 		loaded: boolean;
 		active: boolean;
+		ts?: number;
 	}
+
 	let modalShow = false;
 
 	const maxIdx = 999_999_999;
+	const maxCacheSize = 131072; // cboxes cache limit
 	let maxRow = 0;
+	const addMaxRow = 64;
 
 	let socket: WebSocket;
 
@@ -19,7 +23,9 @@
 	let innerWidth: number = 0;
 	let innerHeight: number = 0;
 
-	let startNum = 999_999_000;
+	let startNum = 0;
+
+	let loadReqQueue: number[] = [];
 	let cboxes: Map<number, IItem> = new Map();
 	let items: IItem[][] = [];
 
@@ -58,14 +64,52 @@
 	$: if (innerHeight) updateItems(true);
 
 	const getItem = (i: number) => {
-		return cboxes.get(i) || { idx: i, loaded: false, active: false };
+		const ret = cboxes.get(i) || { idx: i, loaded: false, active: false };
+
+		if (!ret.loaded) {
+			sendLoadReq(i);
+			ret.loaded = true;
+		}
+
+		setItem(i, ret);
+
+		return ret;
 	};
 
 	const setItem = (i: number, cbox: IItem) => {
-		return cboxes.set(i, cbox);
+		cbox.ts = new Date().valueOf();
+
+		const ret = cboxes.set(i, cbox);
+
+		if (cboxes.size > maxCacheSize) {
+			let o;
+			for (const [, v] of cboxes) {
+				if (!o) {
+					o = v;
+					continue;
+				}
+
+				if (o.ts! > v.ts!) {
+					o = v;
+				}
+			}
+
+			if (o) {
+				cboxes.delete(o.idx);
+				if (o.loaded) {
+					const idx = loadReqQueue.findIndex((v) => v === o.idx);
+					if (idx !== -1) {
+						loadReqQueue.splice(idx, 1);
+					}
+				}
+			}
+		}
+
+		return ret;
 	};
 
 	let toggleRounding = false;
+	let wannaSee = -1;
 	const updateItemPerRow = () => {
 		if (!hasItemPerRowSet) {
 			itemPerRow = Math.floor(widthPerRow / widthPerCBox);
@@ -73,7 +117,7 @@
 
 		if (testCboxRow && listRef) {
 			const maxR = Math.ceil(listRef.clientHeight / testCboxRow.clientHeight);
-			maxRow = maxR + 30;
+			maxRow = maxR + addMaxRow;
 			maxStartNum = maxIdx + 1 - maxRow * itemPerRow + itemPerRow;
 		}
 
@@ -81,7 +125,24 @@
 		startNum += startNum > 0 && toggleRounding ? itemPerRow : 0;
 		toggleRounding = !toggleRounding;
 		if (startNum < 0) startNum = 0;
-		if (startNum > maxStartNum) startNum = maxStartNum;
+		if (startNum > maxStartNum) {
+			wannaSee = startNum;
+
+			startNum = maxStartNum;
+		}
+	};
+
+	const scrollToWannaSee = async () => {
+		if (wannaSee === -1) return;
+
+		await tick();
+
+		const to = document.querySelector(`input[data-idx="${wannaSee}"]`);
+		if (to) {
+			to.scrollIntoView({ behavior: 'smooth' });
+		}
+
+		wannaSee = -1;
 	};
 
 	const updateItems = async (recalculateItemPerRow: boolean = false) => {
@@ -157,8 +218,9 @@
 			// else nothing to do
 		}
 
-		console.log({ items, itemPerRow, startNum });
+		//console.log({ items, itemPerRow, startNum });
 		updateCBoxInfo();
+		scrollToWannaSee();
 	};
 
 	let startIdx = 0;
@@ -212,18 +274,18 @@
 
 			if (skip || !topRects || !bottomRects) continue;
 
-			console.log({
-				elRects,
-				containerRects,
-				topRects,
-				secondYes: elRects.bottom < topRects.bottom,
-				firstYes: elRects.bottom > containerRects.top
-			});
+			//console.log({
+			//	elRects,
+			//	containerRects,
+			//	topRects,
+			//	secondYes: elRects.bottom < topRects.bottom,
+			//	firstYes: elRects.bottom > containerRects.top
+			//});
 
 			if (elRects.bottom > containerRects.top && elRects.bottom < topRects.bottom) {
 				topRects = elRects;
 				top = el;
-				console.log({ topSetTo: el });
+				//console.log({ topSetTo: el });
 			}
 
 			if (elRects.top < containerRects.bottom && elRects.top > bottomRects.top) {
@@ -239,17 +301,17 @@
 		startIdx = topInp ? parseInt(topInp) : 0;
 		endIdx = bottomInp ? parseInt(bottomInp) : 0;
 
-		console.log({
-			top,
-			topRects,
-			bottom,
-			bottomRects,
-			topInp,
-			bottomInp,
-			startIdx,
-			endIdx,
-			containerRects
-		});
+		//console.log({
+		//	top,
+		//	topRects,
+		//	bottom,
+		//	bottomRects,
+		//	topInp,
+		//	bottomInp,
+		//	startIdx,
+		//	endIdx,
+		//	containerRects
+		//});
 	};
 
 	const handleScroll = updateSeenStartEnd;
@@ -257,7 +319,7 @@
 	const handleScrollEnd = async (event: Event & { target: EventTarget & any }) => {
 		if (!testCboxRow || !event.target || !topRef || !listRef || !maxRow) return;
 
-		console.log(event, topRef, listRef);
+		//console.log(event, topRef, listRef);
 
 		updateItemPerRow();
 
@@ -273,7 +335,7 @@
 
 		const thirdFourth = oneFourth * 3;
 
-		console.log({ oneFourth, scrollBase, startNum, maxStartNum });
+		//console.log({ oneFourth, scrollBase, startNum, maxStartNum });
 
 		if (scrollBase > thirdFourth && startNum < maxStartNum && endIdx < maxIdx) {
 			// scroll down
@@ -285,7 +347,6 @@
 			const first = firstRow[0];
 			if (!first) throw Error('what');
 			startNum = first.idx + itemPerRow * entry;
-			console.log('Update from scrolldown');
 			vPort.scrollTo(0, scrollBase - mod * entry);
 			update = true;
 		} else if (scrollBase < oneFourth && startNum > 0) {
@@ -299,12 +360,11 @@
 			const first = firstRow[0];
 			if (!first) throw Error('what!');
 			startNum = first.idx - itemPerRow * entry;
-			console.log('Update from scrollup');
 			vPort.scrollTo(0, scrollBase + mod * entry);
 			update = true;
 		}
 
-		console.log({ startNum, update });
+		//console.log({ startNum, update });
 		if (update) updateItems();
 	};
 
@@ -347,20 +407,68 @@
 	};
 
 	const sendSwitch = (i: number) => {
-		if (wsStatus !== 0) return;
+		if (wsStatus !== 0) return -1;
 		socket.send(i.toString());
+
+		return 0;
 	};
 
+	//let start = -1;
+	//let end = -1;
 	const sendLoadReq = (i: number) => {
-		if (wsStatus !== 0) return;
+		if (wsStatus !== 0) {
+			if (!loadReqQueue.includes(i)) {
+				loadReqQueue.push(i);
+
+				if (loadReqQueue.length > maxCacheSize) {
+					const first = loadReqQueue[0];
+					const b = i > first ? i : first;
+					const s = first > i ? i : first;
+
+					const last = loadReqQueue[loadReqQueue.length - 1];
+					const b2 = i > last ? i : last;
+					const s2 = last > i ? i : last;
+
+					let rm;
+					if (b - s >= b2 - s2) rm = loadReqQueue.shift();
+					else rm = loadReqQueue.pop();
+
+					if (rm) {
+						cboxes.delete(rm);
+					}
+				}
+			}
+
+			return -1;
+		}
+
+		//if (start === -1) {
+		//	start = i;
+		//}
+		//
+		//if ((end = -1)) {
+		//	end = i;
+		//	return 0;
+		//}
+		//
+		//if (i !== end + 1) {
+		//	socket.send(`gcvr;${start}-${end}`);
+		//	start = -1;
+		//	end = -1;
+		//} else
 		socket.send(`gcv;${i}`);
+
+		return 0;
 	};
 
 	const switchActive = (item: IItem) => {
-		console.log({ switchActive: item });
-		sendSwitch(item.idx);
-		if (removeActive(item)) return;
+		//console.log({ switchActive: item });
+
+		if (sendSwitch(item.idx)) return -1;
+		if (removeActive(item)) return 0;
 		addActive(item);
+
+		return 0;
 	};
 
 	const handleCBoxClick = (
@@ -370,18 +478,93 @@
 		item: IItem,
 		row: IItem[]
 	) => {
-		switchActive(item);
+		if (switchActive(item)) e.preventDefault();
 	};
 
+	let s = false;
+	let k = 'ehEk';
+	let o = k.length;
+	let g = 0;
+
 	const handleSocketOpen = (ev: Event) => {
+		s = false;
+		k = 'ehEk';
+		o = k.length;
+		g = 0;
 		wsStatus = 0;
 
 		socket.send('gv;');
+
+		for (const q of loadReqQueue) {
+			sendLoadReq(q);
+		}
+
+		loadReqQueue = [];
 	};
 
 	const handleSocketMessage = async (ev: MessageEvent<Blob>) => {
-		const data = await ev.data.text();
-		console.log({ data });
+		let data: string;
+		try {
+			data = await ev.data.text();
+		} catch (e) {
+			console.error('Invalid payload received');
+			console.error(e);
+
+			socketCleanUp();
+
+			return;
+		}
+
+		const retInc = () => {
+			if (!['uc;', 's;'].some((v) => data.startsWith(v))) {
+				g++;
+				if (g > o) {
+					g = 0;
+					k = data;
+				}
+			}
+
+			console.log({ g, k, o, data });
+		};
+		retInc();
+
+		if (data === 'l;') {
+			s = true;
+			return;
+		}
+
+		if (s) {
+			if (data.length > 2) {
+				const r = parseInt(data.substring(2));
+
+				if (!Number.isNaN(r)) o = r;
+			}
+
+			s = false;
+
+			return;
+		}
+
+		if (data === 'h;') {
+			console.log({ s, k, o, g });
+			socket.send(k);
+			return;
+		}
+
+		if (data.startsWith('s;')) {
+			const matches = data.match(/;(\d+);/);
+			const n = parseInt(matches?.[1] || 'e');
+
+			if (Number.isNaN(n)) {
+				console.error('Invalid packet received');
+				socketCleanUp();
+				return;
+			}
+
+			if (data.endsWith('1')) {
+				addActive({ idx: n } as any);
+			} else removeActive({ idx: n } as any);
+		}
 	};
 
 	const handleSocketClose = (ev: CloseEvent) => {
@@ -450,18 +633,16 @@
 
 	$: if (items || itemPerRow) updateCBoxInfo();
 
-	const promptJumpToRow = () => {};
-	const promptJumpToCheckbox = () => {};
+	const promptJumpToRow = () => {
+		modalShow = true;
+	};
+
+	const promptJumpToCheckbox = () => {
+		modalShow = true;
+	};
 
 	const handleJumpToRow = () => {};
 	const handleJumpToCheckbox = () => {};
-
-	//$: {
-	//requiredHeight =
-	//	testCboxRow && itemPerRow ? ((maxIdx + 1) / itemPerRow) * testCboxRow.clientHeight : 0;
-	// split container into smaller part so browser will allow to render it
-	//cH = requiredHeight / scrollTrigger;
-	//}
 
 	$: fStr = Math.floor(f ? f / itemPerRow : 0) + 1;
 	$: lStr = Math.floor(l ? (l - (itemPerRow - 1)) / itemPerRow : 0) + 1;
@@ -526,7 +707,7 @@
 					{#key item[0].idx}
 						<div class="item-row">
 							{#each item as i}
-								<div class="inp-container">
+								<div class="inp-container {i.idx === wannaSee ? 'wns' : ''}">
 									<input
 										class="inp-item"
 										type="checkbox"
@@ -545,7 +726,7 @@
 	</div>
 </div>
 
-<div class="modal-container {modalShow ? 'show' : ''}"></div>
+<div class="modal-container {modalShow ? 'show' : ''}">SHOWW</div>
 
 <style>
 	.page-container {
@@ -609,15 +790,6 @@
 		max-height: 0px;
 	}
 
-	.content-container {
-		/*position: absolute;
-		left: 0;
-		min-width: 100%;
-		width: 100%;
-		max-width: 100%;*/
-		overflow: scroll;
-	}
-
 	.content {
 		height: 100%;
 	}
@@ -632,6 +804,10 @@
 		animation: fade-in ease-in 500ms;
 		width: 34px;
 		height: 34px;
+	}
+
+	.inp-container.wns {
+		background-color: yellow;
 	}
 
 	.inp-item {
@@ -654,8 +830,17 @@
 		background-color: white;
 	}
 
-	.scroll-trigger {
-		transform: translateX(1000%);
+	.modal-container {
+		display: none;
+		position: fixed;
+		width: 100vw;
+		height: 100vh;
+		top: 0;
+		left: 0;
+	}
+
+	.modal-container.show {
+		display: flex;
 	}
 
 	@keyframes fade-in {
