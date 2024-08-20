@@ -4,10 +4,15 @@
 
 	interface IItem {
 		idx: number;
-		loaded: boolean;
-		active: boolean;
-		ts?: number;
 	}
+
+	interface BitInfo {
+		page: number;
+		element: number;
+		state: 0 | 1;
+	}
+
+	const SIZE_PER_PAGE = 1_000_000;
 
 	let modalShow = false;
 
@@ -26,7 +31,7 @@
 	let startNum = 0;
 
 	let loadReqQueue: number[] = [];
-	let cboxes: Map<number, IItem> = new Map();
+	let cboxes: Map<number, Uint8Array> = new Map();
 	let items: IItem[][] = [];
 
 	let contentRef: HTMLDivElement;
@@ -64,48 +69,7 @@
 	$: if (innerHeight) updateItems(true);
 
 	const getItem = (i: number) => {
-		const ret = cboxes.get(i) || { idx: i, loaded: false, active: false };
-
-		if (!ret.loaded) {
-			sendLoadReq(i);
-			ret.loaded = true;
-		}
-
-		setItem(i, ret);
-
-		return ret;
-	};
-
-	const setItem = (i: number, cbox: IItem) => {
-		cbox.ts = new Date().valueOf();
-
-		const ret = cboxes.set(i, cbox);
-
-		if (cboxes.size > maxCacheSize) {
-			let o;
-			for (const [, v] of cboxes) {
-				if (!o) {
-					o = v;
-					continue;
-				}
-
-				if (o.ts! > v.ts!) {
-					o = v;
-				}
-			}
-
-			if (o) {
-				cboxes.delete(o.idx);
-				if (o.loaded) {
-					const idx = loadReqQueue.findIndex((v) => v === o.idx);
-					if (idx !== -1) {
-						loadReqQueue.splice(idx, 1);
-					}
-				}
-			}
-		}
-
-		return ret;
+		return { idx: i };
 	};
 
 	let toggleRounding = false;
@@ -165,7 +129,6 @@
 					if (j > maxIdx) break;
 					const cbox = getItem(j);
 					row.push(cbox);
-					setItem(j, cbox);
 				}
 
 				if (row.length) items.push(row);
@@ -375,34 +338,61 @@
 		socketInit();
 	};
 
-	const findActiveIdx = (item: IItem) => {
-		return getItem(item.idx);
+	const getPageData = (idx: number) => {
+		const page = Math.floor(idx / SIZE_PER_PAGE);
+		return cboxes.get(page);
+	};
+
+	const getElementData = (pageData: Uint8Array | undefined, idx: number) => {
+		if (!pageData) return;
+
+		const element = Math.floor((idx % SIZE_PER_PAGE) / 8);
+		return pageData.at(element);
+	};
+
+	const getState = (idx: number): BitInfo => {
+		const returnError = () =>
+			Object.freeze({
+				state: 0,
+				page: 0,
+				element: 0
+			});
+
+		const page = Math.floor(idx / SIZE_PER_PAGE);
+		const pageData = cboxes.get(page);
+		if (!pageData) return returnError();
+
+		const element = Math.floor((idx % SIZE_PER_PAGE) / 8);
+		const elementData = pageData.at(element);
+		if (typeof elementData === 'undefined') return returnError();
+
+		const bit = 1 << (idx % SIZE_PER_PAGE) % 8;
+
+		return {
+			state: elementData & bit ? 1 : 0,
+			page,
+			element
+		};
+	};
+
+	const setPageElement = (pageData: Uint8Array, v: number, elIdx: number) => {
+		pageData.set([v], elIdx);
 	};
 
 	const isActive = (item: IItem) => {
 		//console.log({ isActive: item, actives });
-		return !!findActiveIdx(item).active;
+		return getState(item.idx).state === 1;
 	};
 
 	const removeActive = (item: IItem) => {
-		const idx = findActiveIdx(item);
-
-		if (idx.active) {
-			setItem(idx.idx, { ...idx, active: false });
-			return true;
+		const s = getState(item.idx);
+		if (s.state) {
 		}
 
 		return false;
 	};
 
 	const addActive = (item: IItem) => {
-		const idx = findActiveIdx(item);
-
-		if (!idx.active) {
-			setItem(idx.idx, { ...idx, active: true });
-			return true;
-		}
-
 		return false;
 	};
 
@@ -502,16 +492,42 @@
 		loadReqQueue = [];
 	};
 
+	const socketPayloadErrClose = (e: any) => {
+		console.error('Invalid payload received');
+		console.error(e);
+
+		socketCleanUp();
+	};
+
+	let awaitingState = false;
 	const handleSocketMessage = async (ev: MessageEvent<Blob>) => {
+		if (awaitingState)
+			try {
+				let sliced;
+
+				if (
+					ev.data.size > 3 &&
+					(sliced = ev.data.slice(0, 3)) &&
+					(await sliced.text()) === 'e;\n'
+				) {
+					const u8arr = new Uint8Array(await ev.data.slice(3).arrayBuffer());
+
+					console.log(u8arr);
+
+					updateItems();
+
+					return;
+				}
+			} catch (e) {
+				socketPayloadErrClose(e);
+				return;
+			}
+
 		let data: string;
 		try {
 			data = await ev.data.text();
 		} catch (e) {
-			console.error('Invalid payload received');
-			console.error(e);
-
-			socketCleanUp();
-
+			socketPayloadErrClose(e);
 			return;
 		}
 
@@ -564,6 +580,8 @@
 			if (data.endsWith('1')) {
 				addActive({ idx: n } as any);
 			} else removeActive({ idx: n } as any);
+
+			return;
 		}
 	};
 
@@ -577,6 +595,7 @@
 
 	const socketInit = () => {
 		socket = new WebSocket(`${SERVER_DOMAIN_URL}/game`);
+		(window as any).sock = socket;
 		wsStatus = 1;
 
 		socket.onopen = (...args) => {
