@@ -1,25 +1,18 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { SERVER_DOMAIN_URL } from '$lib/config';
-
-	interface IItem {
-		idx: number;
-	}
-
-	interface BitInfo {
-		page: number;
-		element: number;
-		state: 0 | 1;
-	}
-
-	const SIZE_PER_PAGE = 1_000_000;
+	import { type BitInfo, type IItem } from '$lib/interfaces';
+	import {
+		BASE_MIN_RENDER_ROW,
+		MAX_LOAD_REQ_QUEUE_SIZE,
+		MAX_CBOX_IDX,
+		SIZE_PER_PAGE
+	} from '$lib/constants';
+	import { getBitState, setPageElement } from '$lib/bitUtils';
 
 	let modalShow = false;
 
-	const maxIdx = 999_999_999;
-	const maxCacheSize = 131072; // cboxes cache limit
 	let maxRow = 0;
-	const addMaxRow = 64;
 
 	let socket: WebSocket;
 
@@ -30,6 +23,7 @@
 
 	let startNum = 0;
 
+	// queue for page load request
 	let loadReqQueue: number[] = [];
 	let cboxes: Map<number, Uint8Array> = new Map();
 	let items: IItem[][] = [];
@@ -81,8 +75,8 @@
 
 		if (testCboxRow && listRef) {
 			const maxR = Math.ceil(listRef.clientHeight / testCboxRow.clientHeight);
-			maxRow = maxR + addMaxRow;
-			maxStartNum = maxIdx + 1 - maxRow * itemPerRow + itemPerRow;
+			maxRow = maxR + BASE_MIN_RENDER_ROW;
+			maxStartNum = MAX_CBOX_IDX + 1 - maxRow * itemPerRow + itemPerRow;
 		}
 
 		startNum = startNum - (startNum % itemPerRow);
@@ -126,13 +120,13 @@
 				const end = start + itemPerRow;
 
 				for (let j = start; j < end; j++) {
-					if (j > maxIdx) break;
+					if (j > MAX_CBOX_IDX) break;
 					const cbox = getItem(j);
 					row.push(cbox);
 				}
 
 				if (row.length) items.push(row);
-				if (row[row.length - 1].idx >= maxIdx) break;
+				if (row[row.length - 1].idx >= MAX_CBOX_IDX) break;
 			}
 		} else {
 			// push and pop according new startNum
@@ -161,16 +155,16 @@
 				// scrolling down, shift and push
 				let lid = 0;
 				for (let j = 0; j < rpt; j++) {
-					if (lid > maxIdx) break;
+					if (lid > MAX_CBOX_IDX) break;
 					const lastRow = items[items.length - 1];
 					const lastItem = lastRow[lastRow.length - 1];
 					lid = lastItem.idx;
-					if (lid > maxIdx) break;
+					if (lid > MAX_CBOX_IDX) break;
 					items.shift();
 					const row = [];
 					for (let i = lastItem.idx + 1; i < lastItem.idx + 1 + itemPerRow; i++) {
 						lid = i;
-						if (lid > maxIdx) break;
+						if (lid > MAX_CBOX_IDX) break;
 						row.push(getItem(i));
 					}
 					if (row.length) items.push(row);
@@ -300,7 +294,7 @@
 
 		//console.log({ oneFourth, scrollBase, startNum, maxStartNum });
 
-		if (scrollBase > thirdFourth && startNum < maxStartNum && endIdx < maxIdx) {
+		if (scrollBase > thirdFourth && startNum < maxStartNum && endIdx < MAX_CBOX_IDX) {
 			// scroll down
 			const diff = scrollBase - thirdFourth;
 			const entry = Math.ceil(diff / mod);
@@ -343,40 +337,35 @@
 		return cboxes.get(page);
 	};
 
-	const getElementData = (pageData: Uint8Array | undefined, idx: number) => {
-		if (!pageData) return;
-
-		const element = Math.floor((idx % SIZE_PER_PAGE) / 8);
-		return pageData.at(element);
-	};
-
 	const getState = (idx: number): BitInfo => {
 		const returnError = () =>
 			Object.freeze({
 				state: 0,
-				page: 0,
-				element: 0
+				page: -1,
+				elementIdx: -1,
+				bit: 0,
+				pageData: undefined,
+				elementValue: 0
 			});
 
 		const page = Math.floor(idx / SIZE_PER_PAGE);
 		const pageData = cboxes.get(page);
 		if (!pageData) return returnError();
 
-		const element = Math.floor((idx % SIZE_PER_PAGE) / 8);
-		const elementData = pageData.at(element);
-		if (typeof elementData === 'undefined') return returnError();
+		const elementIdx = Math.floor((idx % SIZE_PER_PAGE) / 8);
+		const elementValue = pageData.at(elementIdx);
+		if (typeof elementValue === 'undefined') return returnError();
 
 		const bit = 1 << (idx % SIZE_PER_PAGE) % 8;
 
 		return {
-			state: elementData & bit ? 1 : 0,
+			state: getBitState(elementValue, bit),
 			page,
-			element
+			elementIdx,
+			bit,
+			pageData,
+			elementValue
 		};
-	};
-
-	const setPageElement = (pageData: Uint8Array, v: number, elIdx: number) => {
-		pageData.set([v], elIdx);
 	};
 
 	const isActive = (item: IItem) => {
@@ -387,6 +376,9 @@
 	const removeActive = (item: IItem) => {
 		const s = getState(item.idx);
 		if (s.state) {
+			setPageElement(s.pageData, s.elementValue & ~s.bit, s.elementIdx);
+
+			return true;
 		}
 
 		return false;
@@ -405,50 +397,33 @@
 
 	//let start = -1;
 	//let end = -1;
-	const sendLoadReq = (i: number) => {
-		if (wsStatus !== 0) {
-			if (!loadReqQueue.includes(i)) {
-				loadReqQueue.push(i);
-
-				if (loadReqQueue.length > maxCacheSize) {
-					const first = loadReqQueue[0];
-					const b = i > first ? i : first;
-					const s = first > i ? i : first;
-
-					const last = loadReqQueue[loadReqQueue.length - 1];
-					const b2 = i > last ? i : last;
-					const s2 = last > i ? i : last;
-
-					let rm;
-					if (b - s >= b2 - s2) rm = loadReqQueue.shift();
-					else rm = loadReqQueue.pop();
-
-					if (rm) {
-						cboxes.delete(rm);
-					}
-				}
-			}
-
-			return -1;
+	const sendLoadReq = (page: number) => {
+		if (cboxes.get(page)) {
+			return 0;
 		}
 
-		//if (start === -1) {
-		//	start = i;
-		//}
-		//
-		//if ((end = -1)) {
-		//	end = i;
-		//	return 0;
-		//}
-		//
-		//if (i !== end + 1) {
-		//	socket.send(`gcvr;${start}-${end}`);
-		//	start = -1;
-		//	end = -1;
-		//} else
-		socket.send(`gcv;${i}`);
+		if (wsStatus === 0) {
+			socket.send(`gp;${page}`);
+			return 0;
+		}
 
-		return 0;
+		if (loadReqQueue.includes(page)) return -1;
+
+		loadReqQueue.push(page);
+		if (loadReqQueue.length <= MAX_LOAD_REQ_QUEUE_SIZE) return -1;
+
+		const first = loadReqQueue[0];
+		const b = page > first ? page : first;
+		const s = first > page ? page : first;
+
+		const last = loadReqQueue[loadReqQueue.length - 1];
+		const b2 = page > last ? page : last;
+		const s2 = last > page ? page : last;
+
+		if (b - s >= b2 - s2) loadReqQueue.shift();
+		else loadReqQueue.pop();
+
+		return -1;
 	};
 
 	const switchActive = (item: IItem) => {
@@ -499,6 +474,7 @@
 		socketCleanUp();
 	};
 
+	// !TODO: make this to store awaited page number
 	let awaitingState = false;
 	const handleSocketMessage = async (ev: MessageEvent<Blob>) => {
 		if (awaitingState)
@@ -515,12 +491,14 @@
 					console.log(u8arr);
 
 					updateItems();
-
 					return;
 				}
 			} catch (e) {
 				socketPayloadErrClose(e);
 				return;
+			} finally {
+				//awaitingState = -1;
+				awaitingState = false;
 			}
 
 		let data: string;
@@ -543,6 +521,12 @@
 			console.log({ g, k, o, data });
 		};
 		retInc();
+
+		if (data.startsWith('ws;')) {
+			// !TODO: parse page number
+			awaitingState = true;
+			return;
+		}
 
 		if (data === 'l;') {
 			s = true;
@@ -588,9 +572,6 @@
 	const handleSocketClose = (ev: CloseEvent) => {
 		// !TODO: toast
 		wsStatus = -1;
-		for (const [, v] of cboxes) {
-			v.loaded = false;
-		}
 	};
 
 	const socketInit = () => {
