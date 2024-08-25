@@ -7,7 +7,7 @@ export interface BitInfo {
 	/**
 	 * Undefined means invalid/error Info.
 	 */
-	pageData: Uint8Array | undefined;
+	pageData: DataView | undefined;
 	elementIdx: number;
 	bit: number;
 	elementValue: number;

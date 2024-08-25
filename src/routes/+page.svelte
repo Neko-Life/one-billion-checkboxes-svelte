@@ -6,7 +6,8 @@
 		BASE_MIN_RENDER_ROW,
 		MAX_LOAD_REQ_QUEUE_SIZE,
 		MAX_CBOX_IDX,
-		SIZE_PER_PAGE
+		SIZE_PER_PAGE,
+		USE_MAX_BIT_COUNT
 	} from '$lib/constants';
 	import { getBitState, setPageElement } from '$lib/bitUtils';
 
@@ -25,7 +26,7 @@
 
 	// queue for page load request
 	let loadReqQueue: number[] = [];
-	let cboxes: Map<number, Uint8Array> = new Map();
+	let cboxes: Map<number, DataView> = new Map();
 	let items: IItem[][] = [];
 
 	let contentRef: HTMLDivElement;
@@ -291,6 +292,7 @@
 		let update = false;
 
 		const thirdFourth = oneFourth * 3;
+		const originalStartNum = startNum;
 
 		//console.log({ oneFourth, scrollBase, startNum, maxStartNum });
 
@@ -309,7 +311,7 @@
 		} else if (scrollBase < oneFourth && startNum > 0) {
 			// scroll up
 			const diff = oneFourth - scrollBase;
-			const entry = Math.ceil(diff / mod);
+			let entry = Math.ceil(diff / mod);
 
 			// !TODO: make this to allow jumping to specific index
 			const firstRow = items[0];
@@ -317,6 +319,11 @@
 			const first = firstRow[0];
 			if (!first) throw Error('what!');
 			startNum = first.idx - itemPerRow * entry;
+			if (startNum < 0) {
+				startNum = 0;
+				entry = originalStartNum / itemPerRow - 1;
+			}
+
 			vPort.scrollTo(0, scrollBase + mod * entry);
 			update = true;
 		}
@@ -350,33 +357,49 @@
 
 		const page = Math.floor(idx / SIZE_PER_PAGE);
 		const pageData = cboxes.get(page);
-		if (!pageData) return returnError();
+		if (!pageData) {
+			sendLoadReq(page);
+			return returnError();
+		}
 
-		const elementIdx = Math.floor((idx % SIZE_PER_PAGE) / 8);
-		const elementValue = pageData.at(elementIdx);
+		const elementIdx = Math.floor((idx % SIZE_PER_PAGE) / USE_MAX_BIT_COUNT);
+		const elementValue = pageData.getUint8(elementIdx);
+		//console.log({ pageData });
+		console.log({ elementValue, elementIdx, idx });
 		if (typeof elementValue === 'undefined') return returnError();
 
-		const bit = 1 << (idx % SIZE_PER_PAGE) % 8;
+		const bit = 1 << (idx % SIZE_PER_PAGE) % USE_MAX_BIT_COUNT;
+		console.log({ bit, idx });
 
-		return {
+		const ret = Object.freeze({
 			state: getBitState(elementValue, bit),
 			page,
 			elementIdx,
 			bit,
 			pageData,
 			elementValue
-		};
+		});
+
+		//console.log(ret);
+
+		return ret;
 	};
 
 	const isActive = (item: IItem) => {
 		//console.log({ isActive: item, actives });
-		return getState(item.idx).state === 1;
+		const state = getState(item.idx);
+
+		console.log({ item, state, page: state.page });
+
+		return state.state === 1;
 	};
 
 	const removeActive = (item: IItem) => {
 		const s = getState(item.idx);
 		if (s.state) {
 			setPageElement(s.pageData, s.elementValue & ~s.bit, s.elementIdx);
+
+			console.log({ removedActive: item.idx });
 
 			return true;
 		}
@@ -385,6 +408,15 @@
 	};
 
 	const addActive = (item: IItem) => {
+		const s = getState(item.idx);
+		if (!s.state) {
+			setPageElement(s.pageData, s.elementValue | s.bit, s.elementIdx);
+
+			console.log({ addActive: item.idx });
+
+			return true;
+		}
+
 		return false;
 	};
 
@@ -404,6 +436,7 @@
 
 		if (wsStatus === 0) {
 			socket.send(`gp;${page}`);
+			cboxes.set(page, new DataView(new ArrayBuffer(0)));
 			return 0;
 		}
 
@@ -446,16 +479,20 @@
 		if (switchActive(item)) e.preventDefault();
 	};
 
+	// socket states
 	let s = false;
 	let k = 'ehEk';
 	let o = k.length;
 	let g = 0;
+	let awaitingState = -1;
 
 	const handleSocketOpen = (ev: Event) => {
 		s = false;
 		k = 'ehEk';
 		o = k.length;
 		g = 0;
+		awaitingState = -1;
+		cboxes.clear();
 		wsStatus = 0;
 
 		socket.send('gv;');
@@ -474,36 +511,31 @@
 		socketCleanUp();
 	};
 
-	// !TODO: make this to store awaited page number
-	let awaitingState = false;
-	const handleSocketMessage = async (ev: MessageEvent<Blob>) => {
-		if (awaitingState)
+	let socketMessages: MessageEvent<ArrayBuffer>[] = [];
+	let handlingSocketMessage = false;
+
+	const handleSocketMessageEvent = (ev: MessageEvent<ArrayBuffer>) => {
+		//console.log({ awaitingState });
+		if (awaitingState >= 0)
 			try {
-				let sliced;
+				const u8arr = new DataView(ev.data);
 
-				if (
-					ev.data.size > 3 &&
-					(sliced = ev.data.slice(0, 3)) &&
-					(await sliced.text()) === 'e;\n'
-				) {
-					const u8arr = new Uint8Array(await ev.data.slice(3).arrayBuffer());
+				console.log({ awaitingState, u8arr });
 
-					console.log(u8arr);
+				cboxes.set(awaitingState, u8arr);
 
-					updateItems();
-					return;
-				}
+				updateItems(true);
+				return;
 			} catch (e) {
 				socketPayloadErrClose(e);
 				return;
 			} finally {
-				//awaitingState = -1;
-				awaitingState = false;
+				awaitingState = -1;
 			}
 
 		let data: string;
 		try {
-			data = await ev.data.text();
+			data = String.fromCharCode.apply(null, new Uint8Array(ev.data) as any);
 		} catch (e) {
 			socketPayloadErrClose(e);
 			return;
@@ -523,8 +555,13 @@
 		retInc();
 
 		if (data.startsWith('ws;')) {
-			// !TODO: parse page number
-			awaitingState = true;
+			const nStr = data.substring(3);
+			const n = nStr.length ? parseInt(nStr) : NaN;
+			if (Number.isNaN(n)) return;
+
+			//console.log({ awaitingStateBeforeSet: awaitingState });
+			awaitingState = n;
+			//console.log({ awaitingStateAfterSet: awaitingState });
 			return;
 		}
 
@@ -537,7 +574,11 @@
 			if (data.length > 2) {
 				const r = parseInt(data.substring(2));
 
-				if (!Number.isNaN(r)) o = r;
+				console.log({ r });
+
+				if (!Number.isNaN(r) && r) {
+					o = r;
+				}
 			}
 
 			s = false;
@@ -562,11 +603,32 @@
 			}
 
 			if (data.endsWith('1')) {
-				addActive({ idx: n } as any);
-			} else removeActive({ idx: n } as any);
+				addActive({ idx: n });
+			} else removeActive({ idx: n });
 
 			return;
 		}
+	};
+
+	const tryHandleSocketMessage = async () => {
+		if (handlingSocketMessage) return;
+		handlingSocketMessage = true;
+
+		console.log({ socketMessagesBefore: socketMessages });
+		let inc = 0;
+		for (const ev of socketMessages) {
+			await handleSocketMessageEvent(ev);
+			inc++;
+		}
+		console.log({ socketMessagesAfter: socketMessages, inc });
+		socketMessages = [];
+
+		handlingSocketMessage = false;
+	};
+
+	const handleSocketMessage = (ev: MessageEvent<ArrayBuffer>) => {
+		socketMessages.push(ev);
+		tryHandleSocketMessage();
 	};
 
 	const handleSocketClose = (ev: CloseEvent) => {
@@ -576,6 +638,8 @@
 
 	const socketInit = () => {
 		socket = new WebSocket(`${SERVER_DOMAIN_URL}/game`);
+		socket.binaryType = 'arraybuffer';
+
 		(window as any).sock = socket;
 		wsStatus = 1;
 
@@ -585,7 +649,7 @@
 		};
 
 		socket.onmessage = (...args) => {
-			console.log('[MESSAGE]', ...args);
+			//console.log('[MESSAGE]', ...args);
 			handleSocketMessage(args[0]);
 		};
 		socket.onerror = (...args) => console.error('[ERROR]', ...args);
@@ -603,6 +667,8 @@
 	};
 
 	onMount(() => {
+		(window as any).getState = getState;
+
 		if (listRef) {
 			const vPort = listRef; //.$$.ctx[2];
 			vPort.addEventListener('scrollend', handleScrollEnd);
@@ -707,15 +773,17 @@
 					{#key item[0].idx}
 						<div class="item-row">
 							{#each item as i}
-								<div class="inp-container {i.idx === wannaSee ? 'wns' : ''}">
-									<input
-										class="inp-item"
-										type="checkbox"
-										data-idx={i.idx}
-										checked={isActive(i)}
-										on:click={(e) => handleCBoxClick(e, i, item)}
-									/>
-								</div>
+								{#key i.idx}
+									<div class="inp-container {i.idx === wannaSee ? 'wns' : ''}">
+										<input
+											class="inp-item"
+											type="checkbox"
+											data-idx={i.idx}
+											checked={isActive(i)}
+											on:click={(e) => handleCBoxClick(e, i, item)}
+										/>
+									</div>
+								{/key}
 							{/each}
 						</div>
 					{/key}
