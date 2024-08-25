@@ -11,7 +11,7 @@
 	} from '$lib/constants';
 	import { getBitState, setPageElement } from '$lib/bitUtils';
 
-	let modalShow = false;
+	let modalPrompt = '';
 
 	let maxRow = 0;
 
@@ -356,6 +356,8 @@
 				elementValue: 0
 			});
 
+		if (Number.isNaN(idx)) return returnError();
+
 		const page = Math.floor(idx / SIZE_PER_PAGE);
 		const pageData = cboxes.get(page);
 		if (!pageData) {
@@ -392,9 +394,9 @@
 		return ret;
 	};
 
-	const isActive = (item: IItem) => {
+	const isActive = (i: number) => {
 		//console.log({ isActive: item, actives });
-		const state = getState(item.idx);
+		const state = getState(i);
 
 		//console.log({ item, state, page: state.page });
 
@@ -404,11 +406,11 @@
 	const removeActive = (item: IItem) => {
 		const s = getState(item.idx);
 		if (s.state) {
-			setPageElement(s.pageData, s.elementValue & ~s.bit, s.elementIdx);
+			if (setPageElement(s.pageData, s.elementValue & ~s.bit, s.elementIdx)) {
+				//cboxes.set(s.page, s.pageData!);
 
-			//console.log({ removedActive: item.idx });
-
-			return true;
+				return true;
+			}
 		}
 
 		return false;
@@ -417,11 +419,13 @@
 	const addActive = (item: IItem) => {
 		const s = getState(item.idx);
 		if (!s.state) {
-			setPageElement(s.pageData, s.elementValue | s.bit, s.elementIdx);
+			console.log({ sBefore: s });
+			if (setPageElement(s.pageData, s.elementValue | s.bit, s.elementIdx)) {
+				//cboxes.set(s.page, s.pageData!);
+				console.log({ sAfter: getState(item.idx) });
 
-			//console.log({ addActive: item.idx });
-
-			return true;
+				return true;
+			}
 		}
 
 		return false;
@@ -470,6 +474,8 @@
 		//console.log({ switchActive: item });
 		const { e, item: item2, row, holyMolyWackaMoly } = item as any;
 		if (!e || !item2 || !row || holyMolyWackaMoly !== '!') return -1;
+		const s = getState(item.idx);
+		if (s.page === -1) return -1;
 
 		if (sendSwitch(item.idx)) return -1;
 		if (removeActive(item)) return 0;
@@ -741,11 +747,11 @@
 	$: if (items || itemPerRow) updateCBoxInfo();
 
 	const promptJumpToRow = () => {
-		modalShow = true;
+		modalPrompt = 'Jump to Row';
 	};
 
 	const promptJumpToCheckbox = () => {
-		modalShow = true;
+		modalPrompt = 'Jump to Checkbox';
 	};
 
 	const handleJumpToRow = () => {};
@@ -755,6 +761,22 @@
 	$: lStr = Math.floor(l ? (l - (itemPerRow - 1)) / itemPerRow : 0) + 1;
 	//$: console.log({ f, l, fStr, lStr, itemPerRow });
 	//$: console.log({ itemPerRow, innerHeight, maxRow, testCboxRowHeight: testCboxRow?.clientHeight });
+
+	const handleModalClick = (
+		e: (MouseEvent | KeyboardEvent) & {
+			currentTarget: EventTarget & HTMLElement;
+			target: EventTarget | null;
+		}
+	) => {
+		if (!(e.target as HTMLElement)?.classList.contains('modal-content-container')) {
+			return;
+		}
+		e.preventDefault();
+		modalPrompt = '';
+	};
+
+	let modalInputRef = null;
+	const handleModalGo: typeof handleModalClick = (e) => {};
 </script>
 
 <svelte:window bind:innerWidth bind:innerHeight />
@@ -820,7 +842,7 @@
 											class="inp-item"
 											type="checkbox"
 											data-idx={i.idx}
-											checked={isActive(i)}
+											checked={isActive(i.idx)}
 											on:click={(e) => handleCBoxClick(e, i, item)}
 										/>
 									</div>
@@ -835,7 +857,20 @@
 	</div>
 </div>
 
-<div class="modal-container {modalShow ? 'show' : ''}">SHOWW</div>
+<div class="modal-container {!!modalPrompt ? 'show' : ''}">
+	<section
+		class="modal modal-content-container"
+		on:click={handleModalClick}
+		on:keyup={(e) => (e.key === 'Escape' ? handleModalClick(e) : null)}
+		aria-label="Modal Prompt"
+	>
+		<div class="modal-content">
+			<h1>{modalPrompt}</h1>
+			<input bind:this={modalInputRef} />
+			<button on:click={handleModalGo}>GO!</button>
+		</div>
+	</section>
+</div>
 
 <style>
 	.page-container {
@@ -946,10 +981,31 @@
 		height: 100vh;
 		top: 0;
 		left: 0;
+		background-color: rgba(0, 0, 0, 0.2);
 	}
 
 	.modal-container.show {
 		display: flex;
+	}
+
+	.modal {
+		width: 100%;
+		height: 100%;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.modal-content {
+		border-radius: 12px;
+		background-color: white;
+		box-shadow: 0px 10px 30px 1px;
+		padding: 40px;
+		display: flex;
+		flex-direction: column;
+		gap: 20px;
+		justify-content: center;
+		align-items: center;
 	}
 
 	@keyframes fade-in {
