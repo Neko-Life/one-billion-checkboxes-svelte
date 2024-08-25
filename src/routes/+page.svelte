@@ -288,6 +288,7 @@
 	const handleScroll = updateSeenStartEnd;
 
 	const handleScrollEnd = async (event: Event & { target: EventTarget & any }) => {
+		//console.log({ testCboxRow, t: event.target, topRef, listRef, maxRow });
 		if (!testCboxRow || !event.target || !topRef || !listRef || !maxRow) return;
 
 		//console.log(event, topRef, listRef);
@@ -296,8 +297,9 @@
 
 		const vPort = event.target;
 		const scrollBase: number = vPort.scrollTop;
-		const scrollMax: number = vPort.scrollTopMax;
+		const scrollMax: number = vPort.scrollHeight - vPort.clientHeight;
 
+		//console.log({ scrollMax });
 		if (!scrollMax) return;
 
 		const oneFourth = /*cboxes.size ? Math.ceil(cboxes.size / itemPerRow) :*/ scrollMax / 4;
@@ -324,7 +326,9 @@
 				startNum = maxStartNum;
 			}
 
-			vPort.scrollTo(0, scrollBase - mod * entry);
+			const to = scrollBase - mod * entry;
+			//console.log({ to });
+			vPort.scrollTo(0, to);
 			update = true;
 		} else if (scrollBase < oneFourth && startNum > 0) {
 			// scroll up
@@ -342,7 +346,9 @@
 				startNum = 0;
 			}
 
-			vPort.scrollTo(0, scrollBase + mod * entry);
+			const to = scrollBase + mod * entry;
+			//console.log({ to });
+			vPort.scrollTo(0, to);
 			update = true;
 		}
 
@@ -1003,7 +1009,7 @@
 	.title-container p {
 		margin: 0px;
 		margin-top: 10px;
-                gap: 4px;
+		gap: 4px;
 	}
 
 	@media (min-width: 600px) {
