@@ -44,6 +44,7 @@
 	let hasItemPerRowSet = false;
 
 	let userCount = 0;
+	let checkedCount = 0;
 	let maxStartNum = 0;
 
 	const updateWidth = (noUpdate = false) => {
@@ -345,7 +346,7 @@
 			update = true;
 		}
 
-		console.log({ startNum, originalStartNum, update });
+		//console.log({ startNum, originalStartNum, update });
 		if (update) updateItems();
 	};
 
@@ -424,8 +425,7 @@
 		const s = getState(item.idx);
 		if (s.state) {
 			if (setPageElement(s.pageData, s.elementValue & ~s.bit, s.elementIdx)) {
-				//cboxes.set(s.page, s.pageData!);
-
+				checkedCount--;
 				return true;
 			}
 		}
@@ -436,11 +436,9 @@
 	const addActive = (item: IItem) => {
 		const s = getState(item.idx);
 		if (!s.state) {
-			console.log({ sBefore: s });
+			//console.log({ sBefore: s });
 			if (setPageElement(s.pageData, s.elementValue | s.bit, s.elementIdx)) {
-				//cboxes.set(s.page, s.pageData!);
-				console.log({ sAfter: getState(item.idx) });
-
+				checkedCount++;
 				return true;
 			}
 		}
@@ -512,6 +510,7 @@
 		const pr = pe.bind(e);
 
 		if (
+			!e?.target ||
 			switchActive({
 				idx: row.find((v) => v.idx === item.idx)!.idx,
 				e,
@@ -580,7 +579,17 @@
 
 		let data: string;
 		try {
-			data = String.fromCharCode.apply(null, new Uint8Array(ev.data) as any);
+			if (ev.data instanceof ArrayBuffer) {
+				data = '';
+				const dataView = new DataView(ev.data);
+				for (let i = 0; i < dataView.byteLength; i++) {
+					data += String.fromCharCode(dataView.getUint8(i));
+				}
+			} /*if (typeof ev.data === 'string') */ else {
+				data = ev.data;
+			}
+
+			console.log({ data });
 		} catch (e) {
 			socketPayloadErrClose(e);
 			return;
@@ -612,6 +621,18 @@
 
 		if (data === 'l;') {
 			s = true;
+			return;
+		}
+
+		if (data.startsWith('v;')) {
+			const newV = parseInt(data.substring(2));
+			checkedCount = Number.isNaN(newV) ? 0 : newV;
+			return;
+		}
+
+		if (data.startsWith('uc;')) {
+			const newUc = parseInt(data.substring(3));
+			userCount = Number.isNaN(newUc) ? 0 : newUc;
 			return;
 		}
 
@@ -650,6 +671,7 @@
 			if (data.endsWith('1')) {
 				addActive({ idx: n });
 			} else removeActive({ idx: n });
+			items = items;
 
 			return;
 		}
@@ -672,8 +694,9 @@
 	};
 
 	const handleSocketMessage = (ev: MessageEvent<ArrayBuffer>) => {
-		socketMessages.push(ev);
-		tryHandleSocketMessage();
+		//socketMessages.push(ev);
+		//tryHandleSocketMessage();
+		handleSocketMessageEvent(ev);
 	};
 
 	const handleSocketClose = (ev: CloseEvent) => {
@@ -843,8 +866,11 @@
 			</section>
 			<section class="title-container" aria-label="title">
 				<h1>A Billion Checkboxes</h1>
+				<p>Created by <a href="https://github.com/Neko-Life">Shasharina</a></p>
 			</section>
 			<section class="status" aria-label="status">
+				<p>{checkedCount} / 1,000,000,000 Checked</p>
+
 				{#if userCount > 0}
 					<p>{userCount} user{userCount == 1 ? '' : 's'} playing</p>
 				{/if}
@@ -944,19 +970,62 @@
 		border-bottom: 2px solid black;
 	}
 
+	* {
+		font-size: 10px;
+	}
+
 	.info {
+		font-size: 10px;
 		font-weight: 600;
 		font-style: italic;
 	}
 
 	.title-container {
 		display: flex;
+		flex-direction: column;
 		justify-content: center;
 		align-items: center;
 	}
 
 	.title-container h1 {
-		font-size: 36px;
+		font-size: 20px;
+		margin: 0px;
+	}
+
+	@media (min-width: 600px) {
+		* {
+			font-size: 14px;
+		}
+
+		.info {
+			font-size: 16px;
+		}
+
+		.modal-content h1 {
+			font-size: 30px;
+		}
+
+		.modal-content input {
+			font-size: 18px;
+		}
+
+		button {
+			font-size: 14px;
+		}
+
+		.modal-content button {
+			font-size: 24px;
+		}
+	}
+
+	@media (min-width: 1280px) {
+		* {
+			font-size: 16px;
+		}
+
+		.title-container h1 {
+			font-size: 36px;
+		}
 	}
 
 	.status {
@@ -1061,18 +1130,6 @@
 		gap: 20px;
 		justify-content: center;
 		align-items: center;
-	}
-
-	.modal-content h1 {
-		font-size: 30px;
-	}
-
-	.modal-content input {
-		font-size: 18px;
-	}
-
-	.modal-content button {
-		font-size: 24px;
 	}
 
 	@keyframes fade-in {
