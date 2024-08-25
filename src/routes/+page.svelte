@@ -336,6 +336,7 @@
 		// !TODO
 		if (wsStatus != -1) return;
 		socketCleanUp();
+		console.log('Reconnecting...');
 		socketInit();
 	};
 
@@ -363,13 +364,19 @@
 		}
 
 		const elementIdx = Math.floor((idx % SIZE_PER_PAGE) / USE_MAX_BIT_COUNT);
-		const elementValue = pageData.getUint8(elementIdx);
+		let elementValue = 0;
+
+		try {
+			elementValue = pageData.getUint8(elementIdx);
+		} catch (e) {
+			return returnError();
+		}
 		//console.log({ pageData });
-		console.log({ elementValue, elementIdx, idx });
+		//console.log({ elementValue, elementIdx, idx });
 		if (typeof elementValue === 'undefined') return returnError();
 
 		const bit = 1 << (idx % SIZE_PER_PAGE) % USE_MAX_BIT_COUNT;
-		console.log({ bit, idx });
+		//console.log({ bit, idx });
 
 		const ret = Object.freeze({
 			state: getBitState(elementValue, bit),
@@ -389,7 +396,7 @@
 		//console.log({ isActive: item, actives });
 		const state = getState(item.idx);
 
-		console.log({ item, state, page: state.page });
+		//console.log({ item, state, page: state.page });
 
 		return state.state === 1;
 	};
@@ -399,7 +406,7 @@
 		if (s.state) {
 			setPageElement(s.pageData, s.elementValue & ~s.bit, s.elementIdx);
 
-			console.log({ removedActive: item.idx });
+			//console.log({ removedActive: item.idx });
 
 			return true;
 		}
@@ -412,7 +419,7 @@
 		if (!s.state) {
 			setPageElement(s.pageData, s.elementValue | s.bit, s.elementIdx);
 
-			console.log({ addActive: item.idx });
+			//console.log({ addActive: item.idx });
 
 			return true;
 		}
@@ -461,6 +468,8 @@
 
 	const switchActive = (item: IItem) => {
 		//console.log({ switchActive: item });
+		const { e, item: item2, row, holyMolyWackaMoly } = item as any;
+		if (!e || !item2 || !row || holyMolyWackaMoly !== '!') return -1;
 
 		if (sendSwitch(item.idx)) return -1;
 		if (removeActive(item)) return 0;
@@ -476,7 +485,19 @@
 		item: IItem,
 		row: IItem[]
 	) => {
-		if (switchActive(item)) e.preventDefault();
+		const pe = e.preventDefault;
+		const pr = pe.bind(e);
+
+		if (
+			switchActive({
+				idx: row.find((v) => v.idx === item.idx)!.idx,
+				e,
+				item,
+				row,
+				holyMolyWackaMoly: '!'
+			} as any)
+		)
+			pr();
 	};
 
 	// socket states
@@ -502,6 +523,7 @@
 		}
 
 		loadReqQueue = [];
+		console.info("You're ready to go");
 	};
 
 	const socketPayloadErrClose = (e: any) => {
@@ -520,7 +542,7 @@
 			try {
 				const u8arr = new DataView(ev.data);
 
-				console.log({ awaitingState, u8arr });
+				//console.log({ awaitingState, u8arr });
 
 				cboxes.set(awaitingState, u8arr);
 
@@ -550,7 +572,7 @@
 				}
 			}
 
-			console.log({ g, k, o, data });
+			//console.log({ g, k, o, data });
 		};
 		retInc();
 
@@ -574,7 +596,7 @@
 			if (data.length > 2) {
 				const r = parseInt(data.substring(2));
 
-				console.log({ r });
+				//console.log({ r });
 
 				if (!Number.isNaN(r) && r) {
 					o = r;
@@ -587,7 +609,7 @@
 		}
 
 		if (data === 'h;') {
-			console.log({ s, k, o, g });
+			//console.log({ s, k, o, g });
 			socket.send(k);
 			return;
 		}
@@ -614,13 +636,13 @@
 		if (handlingSocketMessage) return;
 		handlingSocketMessage = true;
 
-		console.log({ socketMessagesBefore: socketMessages });
+		//console.log({ socketMessagesBefore: socketMessages });
 		let inc = 0;
 		for (const ev of socketMessages) {
 			await handleSocketMessageEvent(ev);
 			inc++;
 		}
-		console.log({ socketMessagesAfter: socketMessages, inc });
+		//console.log({ socketMessagesAfter: socketMessages, inc });
 		socketMessages = [];
 
 		handlingSocketMessage = false;
@@ -633,6 +655,24 @@
 
 	const handleSocketClose = (ev: CloseEvent) => {
 		// !TODO: toast
+		switch (wsStatus) {
+			case 0:
+				switch (ev.code) {
+					case 69:
+					case 420:
+						console.warn('Disconnected, check your behavior!');
+						console.error('This incident will be reported to @shasharina');
+						break;
+
+					default:
+						console.warn('Disconnected, code:', ev.code);
+				}
+				break;
+			case 1:
+				console.warn('Unable to connect, try again by clicking the `Reconnect` button');
+				break;
+		}
+
 		wsStatus = -1;
 	};
 
@@ -640,11 +680,11 @@
 		socket = new WebSocket(`${SERVER_DOMAIN_URL}/game`);
 		socket.binaryType = 'arraybuffer';
 
-		(window as any).sock = socket;
+		//(window as any).sock = socket;
 		wsStatus = 1;
 
 		socket.onopen = (...args) => {
-			console.log('[OPEN]', ...args);
+			//console.log('[OPEN]', ...args);
 			handleSocketOpen(args[0]);
 		};
 
@@ -652,10 +692,10 @@
 			//console.log('[MESSAGE]', ...args);
 			handleSocketMessage(args[0]);
 		};
-		socket.onerror = (...args) => console.error('[ERROR]', ...args);
+		//socket.onerror = (...args) => console.error('[ERROR]', ...args);
 
 		socket.onclose = (...args) => {
-			console.warn('[CLOSE]', ...args);
+			//console.warn('[CLOSE]', ...args);
 			handleSocketClose(args[0]);
 		};
 	};
@@ -667,7 +707,7 @@
 	};
 
 	onMount(() => {
-		(window as any).getState = getState;
+		//(window as any).getState = getState;
 
 		if (listRef) {
 			const vPort = listRef; //.$$.ctx[2];
@@ -675,6 +715,7 @@
 			vPort.addEventListener('scroll', handleScroll);
 		}
 
+		console.log('Connecting...');
 		socketInit();
 
 		return () => {
