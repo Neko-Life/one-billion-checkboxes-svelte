@@ -589,7 +589,7 @@
 				data = ev.data;
 			}
 
-			console.log({ data });
+			//console.log({ data });
 		} catch (e) {
 			socketPayloadErrClose(e);
 			return;
