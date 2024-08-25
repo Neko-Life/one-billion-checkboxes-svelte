@@ -865,8 +865,9 @@
 				<button on:click={promptJumpToCheckbox}>Jump to checkbox</button>
 			</section>
 			<section class="title-container" aria-label="title">
-				<h1>A Billion Checkboxes</h1>
-				<p>Created by <a href="https://github.com/Neko-Life">Shasharina</a></p>
+				<h1>One Billion Checkboxes</h1>
+				<p><span>Created by </span><a href="https://github.com/Neko-Life">Shasharina</a></p>
+				<p><span>Influence by </span><a href="https://tmcb.helba.ai/">10 Million Checkboxes</a></p>
 			</section>
 			<section class="status" aria-label="status">
 				<p>{checkedCount} / 1,000,000,000 Checked</p>
@@ -987,9 +988,22 @@
 		align-items: center;
 	}
 
+	.title-container * {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		text-align: center;
+	}
+
 	.title-container h1 {
 		font-size: 20px;
 		margin: 0px;
+	}
+
+	.title-container p {
+		margin: 0px;
+		margin-top: 10px;
+                gap: 4px;
 	}
 
 	@media (min-width: 600px) {
