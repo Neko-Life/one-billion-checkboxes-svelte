@@ -69,7 +69,8 @@
 
 	let toggleRounding = false;
 	let wannaSee = -1;
-	const updateItemPerRow = () => {
+	let higlightWannaSee = -1;
+	const updateItemPerRow = (setWannaSee = false) => {
 		if (!hasItemPerRowSet) {
 			itemPerRow = Math.floor(widthPerRow / widthPerCBox);
 		}
@@ -77,40 +78,50 @@
 		if (testCboxRow && listRef) {
 			const maxR = Math.ceil(listRef.clientHeight / testCboxRow.clientHeight);
 			maxRow = maxR + BASE_MIN_RENDER_ROW;
-			maxStartNum = MAX_CBOX_IDX + 1 - maxRow * itemPerRow + itemPerRow;
+			maxStartNum = MAX_CBOX_IDX - maxRow * itemPerRow + itemPerRow;
 		}
 
-		startNum = startNum - (startNum % itemPerRow);
+		startNum = Math.round(startNum - (startNum % itemPerRow));
 		startNum += startNum > 0 && toggleRounding ? itemPerRow : 0;
 		toggleRounding = !toggleRounding;
 		if (startNum < 0) startNum = 0;
 		if (startNum > maxStartNum) {
-			wannaSee = startNum;
-
 			startNum = maxStartNum;
+		}
+		const diff = startNum % itemPerRow;
+		startNum = startNum - diff;
+
+		if (setWannaSee) {
+			wannaSee = startNum;
+			startNum -= Math.round((BASE_MIN_RENDER_ROW / 2) * itemPerRow);
+			if (startNum < 0) startNum = 0;
+			const diff = startNum % itemPerRow;
+			startNum = startNum - diff;
+			setTimeout(() => {
+				listRef && listRef.scrollTo(0, 1);
+			}, 500);
 		}
 	};
 
 	const scrollToWannaSee = async () => {
 		if (wannaSee === -1) return;
 
-		await tick();
-
 		const to = document.querySelector(`input[data-idx="${wannaSee}"]`);
-		if (to) {
-			to.scrollIntoView({ behavior: 'smooth' });
-		}
+		if (!to) return;
+		to.scrollIntoView({ block: 'center' });
 
-		wannaSee = -1;
+		setTimeout(() => {
+			wannaSee = -1;
+		}, 1000);
 	};
 
-	const updateItems = async (recalculateItemPerRow: boolean = false) => {
+	const updateItems = async (recalculateItemPerRow = false, setWannaSee = false) => {
 		await tick();
 		updateWidth(true);
 		if (recalculateItemPerRow) {
 			if (!testCboxRow || !listRef || !contentRef) return;
 
-			updateItemPerRow();
+			updateItemPerRow(setWannaSee);
 
 			items = [];
 
@@ -178,7 +189,6 @@
 
 		//console.log({ items, itemPerRow, startNum });
 		updateCBoxInfo();
-		scrollToWannaSee();
 	};
 
 	let startIdx = 0;
@@ -270,6 +280,8 @@
 		//	endIdx,
 		//	containerRects
 		//});
+
+		scrollToWannaSee();
 	};
 
 	const handleScroll = updateSeenStartEnd;
@@ -299,13 +311,18 @@
 		if (scrollBase > thirdFourth && startNum < maxStartNum && endIdx < MAX_CBOX_IDX) {
 			// scroll down
 			const diff = scrollBase - thirdFourth;
-			const entry = Math.ceil(diff / mod);
+			let entry = Math.ceil(diff / mod);
 
 			const firstRow = items[0];
 			if (!firstRow) throw Error('no way');
 			const first = firstRow[0];
 			if (!first) throw Error('what');
 			startNum = first.idx + itemPerRow * entry;
+			if (startNum > maxStartNum) {
+				entry -= (startNum - maxStartNum) / itemPerRow;
+				startNum = maxStartNum;
+			}
+
 			vPort.scrollTo(0, scrollBase - mod * entry);
 			update = true;
 		} else if (scrollBase < oneFourth && startNum > 0) {
@@ -320,15 +337,15 @@
 			if (!first) throw Error('what!');
 			startNum = first.idx - itemPerRow * entry;
 			if (startNum < 0) {
+				entry -= Math.abs(startNum) / itemPerRow;
 				startNum = 0;
-				entry = originalStartNum / itemPerRow - 1;
 			}
 
 			vPort.scrollTo(0, scrollBase + mod * entry);
 			update = true;
 		}
 
-		//console.log({ startNum, update });
+		console.log({ startNum, originalStartNum, update });
 		if (update) updateItems();
 	};
 
@@ -775,8 +792,38 @@
 		modalPrompt = '';
 	};
 
-	let modalInputRef = null;
-	const handleModalGo: typeof handleModalClick = (e) => {};
+	const handleModalGo = (
+		e: SubmitEvent & {
+			currentTarget: EventTarget & HTMLFormElement;
+		}
+	) => {
+		e.preventDefault();
+
+		const inputs = (e.target as HTMLFormElement).elements;
+		const val = (inputs['goto' as any] as HTMLInputElement).value;
+		const valN = parseInt(val);
+
+		if (Number.isNaN(valN)) {
+			higlightWannaSee = -1;
+			return;
+		}
+
+		const gotoRow = modalPrompt.endsWith('Row');
+
+		if (gotoRow) {
+			startNum = valN * itemPerRow;
+			higlightWannaSee = startNum;
+		} else {
+			startNum = valN;
+			higlightWannaSee = valN;
+		}
+		const diff = startNum % itemPerRow;
+		startNum = startNum - diff;
+
+		updateItems(true, true);
+		(e.target as HTMLFormElement).reset();
+		modalPrompt = '';
+	};
 </script>
 
 <svelte:window bind:innerWidth bind:innerHeight />
@@ -834,10 +881,10 @@
 			<div bind:this={contentRef} class="content">
 				{#each items as item}
 					{#key item[0].idx}
-						<div class="item-row">
+						<div class="item-row {item.some((v) => v.idx === higlightWannaSee) ? 'wns' : ''}">
 							{#each item as i}
 								{#key i.idx}
-									<div class="inp-container {i.idx === wannaSee ? 'wns' : ''}">
+									<div class="inp-container {i.idx === higlightWannaSee ? 'wns' : ''}">
 										<input
 											class="inp-item"
 											type="checkbox"
@@ -864,11 +911,11 @@
 		on:keyup={(e) => (e.key === 'Escape' ? handleModalClick(e) : null)}
 		aria-label="Modal Prompt"
 	>
-		<div class="modal-content">
+		<form class="modal-content" on:submit={handleModalGo}>
 			<h1>{modalPrompt}</h1>
-			<input bind:this={modalInputRef} />
-			<button on:click={handleModalGo}>GO!</button>
-		</div>
+			<input name="goto" type="number" autofocus />
+			<button type="submit">GO!</button>
+		</form>
 	</section>
 </div>
 
@@ -942,16 +989,24 @@
 		display: flex;
 		justify-content: space-evenly;
 		width: 100%;
+		transition-duration: 2500ms;
+		background-color: transparent;
+	}
+
+	.item-row.wns {
+		background-color: cyan;
 	}
 
 	.inp-container {
 		animation: fade-in ease-in 500ms;
 		width: 34px;
 		height: 34px;
+		transition-duration: 2500ms;
+		background-color: transparent;
 	}
 
 	.inp-container.wns {
-		background-color: yellow;
+		background-color: red;
 	}
 
 	.inp-item {
@@ -1006,6 +1061,18 @@
 		gap: 20px;
 		justify-content: center;
 		align-items: center;
+	}
+
+	.modal-content h1 {
+		font-size: 30px;
+	}
+
+	.modal-content input {
+		font-size: 18px;
+	}
+
+	.modal-content button {
+		font-size: 24px;
 	}
 
 	@keyframes fade-in {
