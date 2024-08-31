@@ -892,9 +892,6 @@
 		modalPrompt = 'Jump to Checkbox';
 	};
 
-	const handleJumpToRow = () => {};
-	const handleJumpToCheckbox = () => {};
-
 	$: fStr = Math.floor(f ? f / itemPerRow : 0) + 1;
 	$: lStr = Math.floor(l ? (l - (itemPerRow - 1)) / itemPerRow : 0) + 1;
 	//$: console.log({ f, l, fStr, lStr, itemPerRow });
@@ -922,7 +919,7 @@
 
 		const inputs = (e.target as HTMLFormElement).elements;
 		const val = (inputs['goto' as any] as HTMLInputElement).value;
-		const valN = parseInt(val);
+		const valN = parseInt(val) - 1;
 
 		if (Number.isNaN(valN)) {
 			higlightWannaSee = -1;
@@ -959,8 +956,13 @@
 				</p>
 				<p>{itemPerRow} Column{itemPerRow === 1 ? '' : 's'}</p>
 
-				<button on:click={promptJumpToRow}>Jump to row</button>
-				<button on:click={promptJumpToCheckbox}>Jump to checkbox</button>
+				<div title="Pick your color" class="picker">
+					<!-- data-theme="dark"-->
+					<ColourPicker bind:value={colorValue} />
+					<button title="Reset color" on:click={() => (colorValue = DEFAULT_CHECKBOX_ACCENT)}
+						>Reset</button
+					>
+				</div>
 			</section>
 			<section class="title-container" aria-label="title">
 				<h1>One Billion Checkboxes</h1>
@@ -968,26 +970,23 @@
 				<p><span>Influence by </span><a href="https://tmcb.helba.ai/">10 Million Checkboxes</a></p>
 			</section>
 			<section class="status" aria-label="status">
-				<div class="picker">
-					<!-- data-theme="dark"-->
-					<span>Pick your color!</span>
-					<ColourPicker bind:value={colorValue} />
-					<button on:click={() => (colorValue = DEFAULT_CHECKBOX_ACCENT)}>Reset</button>
-				</div>
 				<div class="status-info">
 					<p>{checkedCount} / 1,000,000,000 Checked</p>
 
 					{#if userCount > 0}
 						<p>{userCount} user{userCount == 1 ? '' : 's'} playing</p>
 					{/if}
-
 					{#if wsStatus === 0}
 						<p>Connected</p>
 					{:else if wsStatus === 1}
 						<p>Connecting...</p>
 					{:else if wsStatus === -1}
-						<button on:click={handleReconnect}>Reconnect</button>
+						<button title="Reconnect" on:click={handleReconnect}>Reconnect</button>
 					{/if}
+					<button title="Jump to specific row" on:click={promptJumpToRow}>Jump to row</button>
+					<button title="Jump to specific checkbox" on:click={promptJumpToCheckbox}
+						>Jump to checkbox</button
+					>
 				</div>
 			</section>
 		</header>
@@ -1048,7 +1047,7 @@
 		<form class="modal-content" on:submit={handleModalGo}>
 			<h1>{modalPrompt}</h1>
 			<input name="goto" type="number" autofocus />
-			<button type="submit">GO!</button>
+			<button title="Submit" type="submit">GO!</button>
 		</form>
 	</section>
 </div>
@@ -1153,17 +1152,13 @@
 		display: flex;
 	}
 
-	.status .picker {
+	.picker {
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
 		align-items: center;
-		flex: 1;
-		gap: 8px;
-	}
-
-	.status .picker span {
-		font-weight: bold;
+		width: fit-content;
+		gap: 14px;
 	}
 
 	.status .status-info {
@@ -1172,6 +1167,11 @@
 		justify-content: flex-end;
 		align-items: flex-end;
 		flex: 1;
+		gap: 14px;
+	}
+
+	.status .status-info p {
+		margin: 0px;
 	}
 
 	main {
