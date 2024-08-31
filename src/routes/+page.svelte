@@ -7,9 +7,13 @@
 		MAX_LOAD_REQ_QUEUE_SIZE,
 		MAX_CBOX_IDX,
 		SIZE_PER_PAGE,
-		USE_MAX_BIT_COUNT
+		//USE_MAX_BIT_COUNT,
+		DEFAULT_CHECKBOX_ACCENT
 	} from '$lib/constants';
 	import { getBitState, setPageElement } from '$lib/bitUtils';
+	import { ColourPicker } from 'svelte-colourpicker';
+
+	let colorValue = DEFAULT_CHECKBOX_ACCENT;
 
 	let modalPrompt = '';
 
@@ -63,6 +67,20 @@
 
 	$: if (innerWidth) updateWidth();
 	$: if (innerHeight) updateItems(true);
+
+	let saveColorValueTimeout: ReturnType<typeof setTimeout> | null = null;
+	$: if (
+		typeof window !== 'undefined' &&
+		colorValue &&
+		colorValue !== window.localStorage.getItem('color')
+	) {
+		if (saveColorValueTimeout) {
+			clearTimeout(saveColorValueTimeout);
+			saveColorValueTimeout = null;
+		}
+
+		saveColorValueTimeout = setTimeout(() => window.localStorage.setItem('color', colorValue), 670);
+	}
 
 	const getItem = (i: number) => {
 		return { idx: i };
@@ -307,7 +325,6 @@
 		let update = false;
 
 		const thirdFourth = oneFourth * 3;
-		const originalStartNum = startNum;
 
 		//console.log({ oneFourth, scrollBase, startNum, maxStartNum });
 
@@ -335,7 +352,6 @@
 			const diff = oneFourth - scrollBase;
 			let entry = Math.ceil(diff / mod);
 
-			// !TODO: make this to allow jumping to specific index
 			const firstRow = items[0];
 			if (!firstRow) throw Error('no way!');
 			const first = firstRow[0];
@@ -352,12 +368,11 @@
 			update = true;
 		}
 
-		//console.log({ startNum, originalStartNum, update });
+		//console.log({ startNum, update });
 		if (update) updateItems();
 	};
 
 	const handleReconnect = () => {
-		// !TODO
 		if (wsStatus != -1) return;
 		socketCleanUp();
 		console.log('Reconnecting...');
@@ -389,11 +404,12 @@
 			return returnError();
 		}
 
-		const elementIdx = Math.floor((idx % SIZE_PER_PAGE) / USE_MAX_BIT_COUNT);
+		//const elementIdx = Math.floor((idx % SIZE_PER_PAGE) / USE_MAX_BIT_COUNT);
+		const elementIdx = Math.floor(idx % SIZE_PER_PAGE);
 		let elementValue = 0;
 
 		try {
-			elementValue = pageData.getUint8(elementIdx);
+			elementValue = pageData.getUint32(elementIdx * 4);
 		} catch (e) {
 			return returnError();
 		}
@@ -401,14 +417,15 @@
 		//console.log({ elementValue, elementIdx, idx });
 		if (typeof elementValue === 'undefined') return returnError();
 
-		const bit = 1 << (idx % SIZE_PER_PAGE) % USE_MAX_BIT_COUNT;
+		//const bit = 1 << (idx % SIZE_PER_PAGE) % USE_MAX_BIT_COUNT;
 		//console.log({ bit, idx });
 
 		const ret = Object.freeze({
-			state: getBitState(elementValue, bit),
+			//state: getBitState(elementValue, bit),
+			state: getBitState(elementValue, 1),
 			page,
 			elementIdx,
-			bit,
+			bit: 1,
 			pageData,
 			elementValue
 		});
@@ -439,6 +456,15 @@
 		return false;
 	};
 
+	const setColor = (n: number, r: number, g: number, b: number, a: number) => {
+		const s = getState(n);
+		setPageElement(
+			s.pageData,
+			((r << (8 * 3)) | (g << (8 * 2)) | (b << 8) | a) & 0xfffffffe,
+			s.elementIdx
+		);
+	};
+
 	const addActive = (item: IItem) => {
 		const s = getState(item.idx);
 		if (!s.state) {
@@ -452,9 +478,19 @@
 		return false;
 	};
 
-	const sendSwitch = (i: number) => {
+	const sendSwitch = (i: number, r: number, g: number, b: number, a: number) => {
 		if (wsStatus !== 0) return -1;
-		socket.send(i.toString());
+		socket.send(
+			i.toString() +
+				';' +
+				r.toString() +
+				';' +
+				g.toString() +
+				';' +
+				b.toString() +
+				';' +
+				a.toString()
+		);
 
 		return 0;
 	};
@@ -491,6 +527,29 @@
 		return -1;
 	};
 
+	const getColorValues = (): [number, number, number, number] => {
+		const matches = colorValue.match(/(\d+(?:\.\d+)?)/g);
+		const ret = matches?.map((v) => Number(v));
+		console.log({ ret, colorValue, matches });
+
+		if (ret?.length === 4) {
+			ret[3] = Math.ceil(ret[3] * 255);
+			// @ts-ignore
+			return ret;
+		}
+
+		// @ts-ignore
+		return [];
+	};
+
+	const getItemColor = (n: number) => {
+		const s = getState(n);
+		if (s.page === -1) return DEFAULT_CHECKBOX_ACCENT;
+
+		const val = s.elementValue;
+		return `rgba(${(val >> (8 * 3)) & 0xff},${(val >> (8 * 2)) & 0xff},${(val >> 8) & 0xff},${(val & 0xff) / 0xff})`;
+	};
+
 	const switchActive = (item: IItem) => {
 		//console.log({ switchActive: item });
 		const { e, item: item2, row, holyMolyWackaMoly } = item as any;
@@ -498,8 +557,11 @@
 		const s = getState(item.idx);
 		if (s.page === -1) return -1;
 
-		if (sendSwitch(item.idx)) return -1;
+		const currentColor = getColorValues();
+		if (sendSwitch(item.idx, ...currentColor)) return -1;
 		if (removeActive(item)) return 0;
+
+		setColor(item.idx, ...currentColor);
 		addActive(item);
 
 		return 0;
@@ -526,6 +588,9 @@
 			} as any)
 		)
 			pr();
+		else {
+			e.currentTarget.style.accentColor = getItemColor(item.idx);
+		}
 	};
 
 	// socket states
@@ -551,6 +616,7 @@
 		}
 
 		loadReqQueue = [];
+		items = items;
 		console.info("You're ready to go");
 	};
 
@@ -665,18 +731,34 @@
 		}
 
 		if (data.startsWith('s;')) {
-			const matches = data.match(/;(\d+);/);
-			const n = parseInt(matches?.[1] || 'e');
+			const matches = data.match(/(\d+)/g);
+			let n = NaN;
+			let r = NaN;
+			let g = NaN;
+			let b = NaN;
+			let a = NaN;
 
-			if (Number.isNaN(n)) {
+			if (matches?.length === 5) {
+				n = parseInt(matches[0]);
+				r = parseInt(matches[1]);
+				g = parseInt(matches[2]);
+				b = parseInt(matches[3]);
+				a = parseInt(matches[4]);
+			}
+
+			if (Number.isNaN(n) || n > MAX_CBOX_IDX) {
 				console.error('Invalid packet received');
 				socketCleanUp();
 				return;
 			}
 
-			if (data.endsWith('1')) {
+			if (a & 1) {
+				setColor(n, r, g, b, a);
 				addActive({ idx: n });
-			} else removeActive({ idx: n });
+			} else {
+				removeActive({ idx: n });
+			}
+
 			items = items;
 
 			return;
@@ -758,8 +840,13 @@
 		}
 	};
 
+	const loadSavedColor = () => {
+		const c = window.localStorage.getItem('color');
+		if (c) colorValue = c;
+	};
+
 	onMount(() => {
-		//(window as any).getState = getState;
+		(window as any).getState = getState;
 
 		if (listRef) {
 			const vPort = listRef; //.$$.ctx[2];
@@ -767,8 +854,13 @@
 			vPort.addEventListener('scroll', handleScroll);
 		}
 
+		console.info("1'000'000'000 Checkboxes - Client");
+		console.info('With Color only compatible build');
+		console.info('https://www.github.com/Neko-Life');
+
 		console.log('Connecting...');
 		socketInit();
+		loadSavedColor();
 
 		return () => {
 			if (listRef) {
@@ -876,19 +968,27 @@
 				<p><span>Influence by </span><a href="https://tmcb.helba.ai/">10 Million Checkboxes</a></p>
 			</section>
 			<section class="status" aria-label="status">
-				<p>{checkedCount} / 1,000,000,000 Checked</p>
+				<div class="picker">
+					<!-- data-theme="dark"-->
+					<span>Pick your color!</span>
+					<ColourPicker bind:value={colorValue} />
+					<button on:click={() => (colorValue = DEFAULT_CHECKBOX_ACCENT)}>Reset</button>
+				</div>
+				<div class="status-info">
+					<p>{checkedCount} / 1,000,000,000 Checked</p>
 
-				{#if userCount > 0}
-					<p>{userCount} user{userCount == 1 ? '' : 's'} playing</p>
-				{/if}
+					{#if userCount > 0}
+						<p>{userCount} user{userCount == 1 ? '' : 's'} playing</p>
+					{/if}
 
-				{#if wsStatus === 0}
-					<p>Connected</p>
-				{:else if wsStatus === 1}
-					<p>Connecting...</p>
-				{:else if wsStatus === -1}
-					<button on:click={handleReconnect}>Reconnect</button>
-				{/if}
+					{#if wsStatus === 0}
+						<p>Connected</p>
+					{:else if wsStatus === 1}
+						<p>Connecting...</p>
+					{:else if wsStatus === -1}
+						<button on:click={handleReconnect}>Reconnect</button>
+					{/if}
+				</div>
 			</section>
 		</header>
 
@@ -923,6 +1023,7 @@
 											type="checkbox"
 											data-idx={i.idx}
 											checked={isActive(i.idx)}
+											style="accent-color: {getItemColor(i.idx)};"
 											on:click={(e) => handleCBoxClick(e, i, item)}
 										/>
 									</div>
@@ -1050,9 +1151,27 @@
 
 	.status {
 		display: flex;
+	}
+
+	.status .picker {
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		align-items: center;
+		flex: 1;
+		gap: 8px;
+	}
+
+	.status .picker span {
+		font-weight: bold;
+	}
+
+	.status .status-info {
+		display: flex;
 		flex-direction: column;
 		justify-content: flex-end;
 		align-items: flex-end;
+		flex: 1;
 	}
 
 	main {
