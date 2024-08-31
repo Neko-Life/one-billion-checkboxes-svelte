@@ -530,7 +530,7 @@
 	const getColorValues = (): [number, number, number, number] => {
 		const matches = colorValue.match(/(\d+(?:\.\d+)?)/g);
 		const ret = matches?.map((v) => Number(v));
-		console.log({ ret, colorValue, matches });
+		//console.log({ ret, colorValue, matches });
 
 		if (ret?.length === 4) {
 			ret[3] = Math.ceil(ret[3] * 255);
@@ -847,7 +847,7 @@
 	};
 
 	onMount(() => {
-		(window as any).getState = getState;
+		//(window as any).getState = getState;
 
 		if (listRef) {
 			const vPort = listRef; //.$$.ctx[2];
