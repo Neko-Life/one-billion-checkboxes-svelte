@@ -544,9 +544,10 @@
 
 	const getItemColor = (n: number) => {
 		const s = getState(n);
-		if (s.page === -1) return DEFAULT_CHECKBOX_ACCENT;
-
 		const val = s.elementValue;
+
+		if (val === 0 || s.page === -1) return DEFAULT_CHECKBOX_ACCENT;
+
 		return `rgba(${(val >> (8 * 3)) & 0xff},${(val >> (8 * 2)) & 0xff},${(val >> 8) & 0xff},${(val & 0xff) / 0xff})`;
 	};
 
@@ -950,9 +951,9 @@
 	<div class="container">
 		<header>
 			<section class="info" aria-label="info">
-				<p>Checkbox: {f + 1}# - {l ? l + 1 : Infinity}#</p>
+				<p>Checkbox: <span>{f + 1}# - {l ? l + 1 : Infinity}#</span></p>
 				<p>
-					Row: {fStr} - {lStr}
+					Row: <span>{fStr} - {lStr}</span>
 				</p>
 				<p>{itemPerRow} Column{itemPerRow === 1 ? '' : 's'}</p>
 
@@ -1172,6 +1173,7 @@
 
 	.status .status-info p {
 		margin: 0px;
+		text-align: right;
 	}
 
 	main {
