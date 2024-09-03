@@ -494,8 +494,8 @@
 
 	//let start = -1;
 	//let end = -1;
-	const sendLoadReq = (page: number) => {
-		if (cboxes.get(page)) {
+	const sendLoadReq = (page: number, force = false) => {
+		if (!force && cboxes.get(page)) {
 			return 0;
 		}
 
@@ -844,6 +844,7 @@
 	};
 
 	let preferDarkMode = false;
+	let pageTimer: ReturnType<typeof setInterval> | null = null;
 	onMount(() => {
 		//(window as any).getState = getState;
 
@@ -864,7 +865,20 @@
 		socketInit();
 		loadSavedColor();
 
+		pageTimer = setInterval(() => {
+			for (const [p, v] of cboxes) {
+				if (v.byteLength !== 0) continue;
+				sendLoadReq(p, true);
+				break;
+			}
+		}, 1000);
+
 		return () => {
+			if (pageTimer) {
+				clearInterval(pageTimer);
+				pageTimer = null;
+			}
+
 			if (listRef) {
 				const vPort = listRef; //.$$.ctx[2];
 				vPort.removeEventListener('scrollend', handleScrollEnd);
