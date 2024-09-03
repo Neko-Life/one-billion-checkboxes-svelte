@@ -1270,7 +1270,7 @@
 
 	.modal-content {
 		border-radius: 12px;
-		background-color: white;
+		background-color: light-dark(white, #181818);
 		box-shadow: 0px 10px 30px 1px;
 		padding: 40px;
 		display: flex;
@@ -1279,10 +1279,6 @@
 		justify-content: center;
 		align-items: center;
 	}
-
-        [data-theme="dark"] .modal-content {
-		background-color: #181818;
-        }
 
 	@keyframes fade-in {
 		0% {
