@@ -12,6 +12,7 @@
 	} from '$lib/constants';
 	import { getBitState, setPageElement } from '$lib/bitUtils';
 	import { ColourPicker } from 'svelte-colourpicker';
+	import { onBrowser } from '$lib/utils';
 
 	let colorValue = DEFAULT_CHECKBOX_ACCENT;
 
@@ -69,11 +70,7 @@
 	$: if (innerHeight) updateItems(true);
 
 	let saveColorValueTimeout: ReturnType<typeof setTimeout> | null = null;
-	$: if (
-		typeof window !== 'undefined' &&
-		colorValue &&
-		colorValue !== window.localStorage.getItem('color')
-	) {
+	$: if (onBrowser() && colorValue && colorValue !== window.localStorage.getItem('color')) {
 		if (saveColorValueTimeout) {
 			clearTimeout(saveColorValueTimeout);
 			saveColorValueTimeout = null;
@@ -943,11 +940,26 @@
 		(e.target as HTMLFormElement).reset();
 		modalPrompt = '';
 	};
+
+	let dataTheme = '';
+	const handleDarkModeChange = (
+		e: Event & {
+			currentTarget: EventTarget & HTMLInputElement;
+		}
+	) => {
+		if (e.currentTarget.checked) {
+			document.documentElement.style.colorScheme = 'dark';
+		} else {
+			document.documentElement.style.colorScheme = '';
+		}
+
+		dataTheme = document.documentElement.style.colorScheme;
+	};
 </script>
 
 <svelte:window bind:innerWidth bind:innerHeight />
 
-<div class="page-container">
+<div class="page-container" data-theme={dataTheme}>
 	<div class="container">
 		<header>
 			<section class="info" aria-label="info">
@@ -957,12 +969,18 @@
 				</p>
 				<p>{itemPerRow} Column{itemPerRow === 1 ? '' : 's'}</p>
 
-				<div title="Pick your color" class="picker">
-					<!-- data-theme="dark"-->
-					<ColourPicker bind:value={colorValue} />
-					<button title="Reset color" on:click={() => (colorValue = DEFAULT_CHECKBOX_ACCENT)}
-						>Reset</button
-					>
+				<div class="picker-container">
+					<section title="Pick your color" aria-label="Checkbox Color Picker" class="picker">
+						<ColourPicker bind:value={colorValue} />
+						<button title="Reset color" on:click={() => (colorValue = DEFAULT_CHECKBOX_ACCENT)}
+							>Reset</button
+						>
+					</section>
+
+					<section aria-label="Dark Mode Option">
+						<input id="dark-mode-inp" type="checkbox" on:change={handleDarkModeChange} />
+						<label for="dark-mode-inp">Dark Mode</label>
+					</section>
 				</div>
 			</section>
 			<section class="title-container" aria-label="title">
@@ -1000,17 +1018,8 @@
 					<input class="inp-item" type="checkbox" />
 				</div>
 			</div>
-			<div class="zh-cov"></div>
 
 			<div bind:this={topRef}></div>
-			<!--
-			{#each new Array(scrollTrigger).fill(null) as i}
-				<div style="min-height: {cH}px;" class="scroll-trigger">whats wrong w u?</div>
-			{/each}
-					<div style="padding-top: {contentPT}px;"></div>
-			<div  class="content-container">
-			</div>
-                        -->
 			<div bind:this={contentRef} class="content">
 				{#each items as item}
 					{#key item[0].idx}
@@ -1038,7 +1047,7 @@
 	</div>
 </div>
 
-<div class="modal-container {!!modalPrompt ? 'show' : ''}">
+<div data-theme={dataTheme} class="modal-container {!!modalPrompt ? 'show' : ''}">
 	<section
 		class="modal modal-content-container"
 		on:click={handleModalClick}
@@ -1080,6 +1089,11 @@
 
 	* {
 		font-size: 10px;
+	}
+
+	.picker-container {
+		display: flex;
+		gap: 8px;
 	}
 
 	.info {
@@ -1229,14 +1243,7 @@
 	.zh {
 		z-index: -1;
 		position: absolute;
-	}
-
-	.zh-cov {
-		z-index: -1;
-		position: absolute;
-		height: 100%;
-		width: 100%;
-		background-color: white;
+                opacity: 0;
 	}
 
 	.modal-container {
@@ -1272,6 +1279,10 @@
 		justify-content: center;
 		align-items: center;
 	}
+
+        [data-theme="dark"] .modal-content {
+		background-color: #181818;
+        }
 
 	@keyframes fade-in {
 		0% {
