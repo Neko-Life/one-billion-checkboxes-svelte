@@ -432,13 +432,17 @@
 		return ret;
 	};
 
+	const isActiveState = (state: BitInfo) => {
+		return state.state === 1;
+	};
+
 	const isActive = (i: number) => {
 		//console.log({ isActive: item, actives });
 		const state = getState(i);
 
 		//console.log({ item, state, page: state.page });
 
-		return state.state === 1;
+		return isActiveState(state);
 	};
 
 	const removeActive = (item: IItem) => {
@@ -541,13 +545,27 @@
 		return [];
 	};
 
-	const getItemColor = (n: number) => {
-		const s = getState(n);
-		const val = s.elementValue;
+	const getItemColorState = (state: BitInfo) => {
+		const val = state.elementValue;
 
-		if (val === 0 || s.page === -1) return DEFAULT_CHECKBOX_ACCENT;
+		if (val === 0 || state.page === -1) return DEFAULT_CHECKBOX_ACCENT;
 
 		return `rgba(${(val >> (8 * 3)) & 0xff},${(val >> (8 * 2)) & 0xff},${(val >> 8) & 0xff},${(val & 0xff) / 0xff})`;
+	};
+
+	const getItemColor = (n: number) => {
+		const s = getState(n);
+		return getItemColorState(s);
+	};
+
+	const getCBoxProps = (i: IItem) => {
+		const state = getState(i.idx);
+
+		return {
+			checked: isActiveState(state),
+			style: `accent-color: ${getItemColorState(state)};`,
+			disabled: state.page === -1
+		};
 	};
 
 	const switchActive = (item: IItem) => {
@@ -1063,8 +1081,7 @@
 											class="inp-item"
 											type="checkbox"
 											data-idx={i.idx}
-											checked={isActive(i.idx)}
-											style="accent-color: {getItemColor(i.idx)};"
+											{...getCBoxProps(i)}
 											on:click={(e) => handleCBoxClick(e, i, item)}
 										/>
 									</div>
