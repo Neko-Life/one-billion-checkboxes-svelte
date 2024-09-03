@@ -494,6 +494,7 @@
 
 	//let start = -1;
 	//let end = -1;
+	let last_gp = new Date().valueOf();
 	const sendLoadReq = (page: number, force = false) => {
 		if (!force && cboxes.get(page)) {
 			return 0;
@@ -502,6 +503,7 @@
 		if (wsStatus === 0) {
 			socket.send(`gp;${page}`);
 			cboxes.set(page, new DataView(new ArrayBuffer(0)));
+			last_gp = new Date().valueOf();
 			return 0;
 		}
 
@@ -867,7 +869,7 @@
 
 		pageTimer = setInterval(() => {
 			for (const [p, v] of cboxes) {
-				if (v.byteLength !== 0) continue;
+				if (v.byteLength !== 0 || new Date().valueOf() - last_gp < 1000) continue;
 				sendLoadReq(p, true);
 				break;
 			}
