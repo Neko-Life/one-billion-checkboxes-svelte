@@ -843,8 +843,12 @@
 		if (c) colorValue = c;
 	};
 
+	let preferDarkMode = false;
 	onMount(() => {
 		//(window as any).getState = getState;
+
+		preferDarkMode = window.localStorage.getItem('preferDarkMode') === '1';
+		updateDarkMode();
 
 		if (listRef) {
 			const vPort = listRef; //.$$.ctx[2];
@@ -942,18 +946,25 @@
 	};
 
 	let dataTheme = '';
+	const updateDarkMode = () => {
+		if (preferDarkMode) {
+			document.documentElement.style.colorScheme = 'dark';
+			window.localStorage.setItem('preferDarkMode', '1');
+		} else {
+			document.documentElement.style.colorScheme = '';
+			window.localStorage.removeItem('preferDarkMode');
+		}
+
+		dataTheme = document.documentElement.style.colorScheme;
+	};
+
 	const handleDarkModeChange = (
 		e: Event & {
 			currentTarget: EventTarget & HTMLInputElement;
 		}
 	) => {
-		if (e.currentTarget.checked) {
-			document.documentElement.style.colorScheme = 'dark';
-		} else {
-			document.documentElement.style.colorScheme = '';
-		}
-
-		dataTheme = document.documentElement.style.colorScheme;
+		preferDarkMode = e.currentTarget.checked;
+		updateDarkMode();
 	};
 </script>
 
@@ -978,7 +989,12 @@
 					</section>
 
 					<section aria-label="Dark Mode Option">
-						<input id="dark-mode-inp" type="checkbox" on:change={handleDarkModeChange} />
+						<input
+							id="dark-mode-inp"
+							type="checkbox"
+							bind:checked={preferDarkMode}
+							on:change={handleDarkModeChange}
+						/>
 						<label for="dark-mode-inp">Dark Mode</label>
 					</section>
 				</div>
@@ -1084,7 +1100,7 @@
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
 		padding: 8px;
-		border-bottom: 2px solid black;
+		border-bottom: 2px solid light-dark(black, white);
 	}
 
 	* {
@@ -1243,7 +1259,7 @@
 	.zh {
 		z-index: -1;
 		position: absolute;
-                opacity: 0;
+		opacity: 0;
 	}
 
 	.modal-container {
