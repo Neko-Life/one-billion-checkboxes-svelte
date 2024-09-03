@@ -1,3 +1,3 @@
 #!/bin/bash
 
-npm ci --omit dev
+npm ci --legacy-peer-deps --omit dev
