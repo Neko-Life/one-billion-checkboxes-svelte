@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount } from 'svelte';
 	import { SERVER_DOMAIN_URL } from '$lib/config';
 	import { type BitInfo, type IItem } from '$lib/interfaces';
 	import {
@@ -132,7 +132,6 @@
 	};
 
 	const updateItems = async (recalculateItemPerRow = false, setWannaSee = false) => {
-		await tick();
 		updateWidth(true);
 		if (recalculateItemPerRow) {
 			if (!testCboxRow || !listRef || !contentRef) return;
@@ -221,7 +220,7 @@
 	const updateSeenStartEnd = async () => {
 		if (!listRef) return;
 
-		await tick();
+		//await tick();
 
 		const listEl = document.getElementsByClassName('item-row') as HTMLCollectionOf<HTMLDivElement>;
 
@@ -800,9 +799,8 @@
 	};
 
 	const handleSocketMessage = (ev: MessageEvent<ArrayBuffer>) => {
-		//socketMessages.push(ev);
-		//tryHandleSocketMessage();
-		handleSocketMessageEvent(ev);
+		socketMessages.push(ev);
+		tryHandleSocketMessage();
 	};
 
 	const handleSocketClose = (ev: CloseEvent) => {
