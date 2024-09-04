@@ -299,7 +299,15 @@
 		scrollToWannaSee();
 	};
 
-	const handleScroll = updateSeenStartEnd;
+	let scrollEndTimer: ReturnType<typeof setTimeout> | null = null;
+	const handleScroll = (event: Event & { target: EventTarget & any }) => {
+		if (scrollEndTimer) {
+			clearTimeout(scrollEndTimer);
+			scrollEndTimer = null;
+		}
+		scrollEndTimer = setTimeout(() => handleScrollEnd(event), 100);
+		updateSeenStartEnd();
+	};
 
 	const handleScrollEnd = async (event: Event & { target: EventTarget & any }) => {
 		//console.log({ testCboxRow, t: event.target, topRef, listRef, maxRow });
@@ -871,7 +879,6 @@
 
 		if (listRef) {
 			const vPort = listRef; //.$$.ctx[2];
-			vPort.addEventListener('scrollend', handleScrollEnd);
 			vPort.addEventListener('scroll', handleScroll);
 		}
 
@@ -899,7 +906,6 @@
 
 			if (listRef) {
 				const vPort = listRef; //.$$.ctx[2];
-				vPort.removeEventListener('scrollend', handleScrollEnd);
 				vPort.removeEventListener('scroll', handleScroll);
 			}
 
